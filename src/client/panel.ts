@@ -987,7 +987,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const stamp = lastUpdated === null ? '尚未刷新' : `最近更新 ${lastUpdated.toLocaleTimeString()}`
   // The footer always states the instance and the last refresh time; transient
   // messages go to the corner toast instead of replacing this line.
-  const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8 } },
+  const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' } },
     createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
     (() => {
       // Rendered, not merely logged: this single line says how far the native
@@ -1005,7 +1005,19 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: { fontSize: 11, color: status.registered ? TOKEN.dim : '#b45309' },
       }, text)
     })(),
-    createElement('span', { 'data-zentao-stamp': '1' }, stamp))
+    createElement('span', { 'data-zentao-stamp': '1' }, stamp),
+    createElement('button', {
+      type: 'button',
+      'data-zentao-action': 'reload-ui',
+      // The desktop app has NO Reload menu item and no Cmd+R binding (verified by
+      // enumerating its menus with System Events), so a page could only be
+      // refreshed by closing and reopening it. This is that missing affordance.
+      title: '重新加载界面（等价于刷新页面；只重载浏览器半边，不动宿主进程）',
+      onClick: () => {
+        if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') window.location.reload()
+      },
+      style: { cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
+    }, '重载界面'))
 
   // Right-edge drawer, mirroring the reference plugin's `panel`.
   const panel = createElement('div', {

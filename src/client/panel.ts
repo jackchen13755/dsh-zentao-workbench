@@ -205,7 +205,8 @@ const PANEL_CSS = `
 .zt-btn:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 6%, transparent); }
 .zt-btn-primary { border-color: #2563eb; color: #2563eb; font-weight: 600; }
 .zt-btn-primary:hover { background: color-mix(in srgb, #2563eb 10%, transparent); }
-.zt-field { height: 26px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: transparent; color: inherit; font-size: 12px; padding: 0 8px; }
+.zt-field { height: 26px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: transparent; color: inherit; font-size: 12px; padding: 0 22px 0 8px; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; transition: border-color .12s ease, background-color .12s ease; }
+.zt-field:hover { background-color: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 5%, transparent); }
 .zt-field:focus { outline: 2px solid color-mix(in srgb, #2563eb 40%, transparent); outline-offset: 1px; }
 .zt-sec { padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
 .zt-label { font-size: 11px; color: var(--dsw-alias-label-secondary, #888); margin-bottom: 4px; }
@@ -225,11 +226,23 @@ const PANEL_CSS = `
 .zt-chip-warn { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #92400e; }
 .zt-hist { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l1, #eceff3); color: var(--dsw-alias-label-secondary, #888); font-size: 11px; line-height: 1.6; }
 .zt-desc { font-size: 12px; line-height: 1.65; border: 1px solid var(--dsw-alias-border-l1, #eceff3); border-radius: 10px; padding: 10px 12px; overflow-x: auto; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); }
-.zt-search { display: flex; align-items: center; gap: 6px; margin: 10px 12px 0; padding: 0 8px; height: 30px; border-radius: 9px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); transition: border-color .12s ease, box-shadow .12s ease; }
+.zt-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
+.zt-toolbar-note { font-size: 11px; color: var(--dsw-alias-label-secondary, #888); }
+.zt-checkall { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); font-size: 11px; color: var(--dsw-alias-label-secondary, #888); cursor: pointer; user-select: none; }
+.zt-checkall:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 6%, transparent); }
+.zt-checkall input { margin: 0; cursor: pointer; }
+.zt-checkall-on { border-color: #2563eb; color: #1d4ed8; background: color-mix(in srgb, #2563eb 10%, transparent); font-weight: 600; }
+.zt-batch { display: flex; align-items: center; gap: 6px; margin: 8px 12px 0; padding: 5px 8px 5px 10px; border-radius: 9px; border: 1px solid color-mix(in srgb, #2563eb 32%, transparent); background: color-mix(in srgb, #2563eb 8%, transparent); }
+.zt-batch-count { font-size: 11px; font-weight: 600; color: #1d4ed8; white-space: nowrap; }
+.zt-batch .zt-btn { height: 24px; padding: 0 9px; }
+.zt-batch-clear { margin-left: auto; border: none; background: transparent; color: var(--dsw-alias-label-secondary, #888); cursor: pointer; font-size: 11px; line-height: 1; padding: 5px 6px; border-radius: 6px; }
+.zt-batch-clear:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 10%, transparent); color: var(--dsw-alias-label-primary, #111); }
+.zt-search { display: flex; align-items: center; gap: 7px; margin: 10px 12px 0; padding: 0 9px; height: 32px; border-radius: 9px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); transition: border-color .12s ease, box-shadow .12s ease; }
 .zt-search:hover { border-color: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 18%, transparent); }
 .zt-search:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px color-mix(in srgb, #2563eb 16%, transparent); }
-.zt-search-icon { opacity: .45; font-size: 14px; line-height: 1; }
-.zt-search input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent; color: inherit; font-size: 12px; }
+.zt-search-icon { flex: 0 0 auto; width: 17px; height: 17px; opacity: .55; color: var(--dsw-alias-label-secondary, #888); }
+.zt-search:focus-within .zt-search-icon { opacity: .9; color: #2563eb; }
+.zt-search input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent; color: inherit; font-size: 13px; }
 .zt-search input::placeholder { color: var(--dsw-alias-label-secondary, #999); }
 .zt-search-clear { border: none; background: transparent; color: inherit; opacity: .5; cursor: pointer; font-size: 11px; line-height: 1; padding: 4px 5px; border-radius: 6px; }
 .zt-search-clear:hover { opacity: 1; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 10%, transparent); }
@@ -791,7 +804,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     }
 
     if (tab === 'bugs') body.push(createElement('div', { key: 'search', className: 'zt-search' },
-      createElement('span', { className: 'zt-search-icon', 'aria-hidden': 'true' }, '⌕'),
+      // Vector, not the ⌕ glyph: the glyph's size varies with the system font and
+      // could not be enlarged cleanly (user asked for a bigger icon).
+      createElement('svg', {
+        className: 'zt-search-icon',
+        viewBox: '0 0 16 16',
+        width: 17,
+        height: 17,
+        'aria-hidden': 'true',
+        focusable: 'false',
+      },
+        createElement('circle', { cx: 6.8, cy: 6.8, r: 4.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7 }, null),
+        createElement('line', { x1: 10.4, y1: 10.4, x2: 14.2, y2: 14.2, stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' }, null)),
       createElement('input', {
         'data-zentao-search': '1',
         // Local filter over the page already fetched: the list endpoint rejects
@@ -816,89 +840,125 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             onClick: () => setSearch(''),
           }, '✕')))
 
-    if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
-      createElement('select', {
-        'data-zentao-scope': '1',
-        title: '范围：我的 Bug，或某个项目里的 Bug',
-        value: scope,
-        onChange: (event: { target: { value: string } }) => setScope(event.target.value === 'project' ? 'project' : 'mine'),
-        style: { minWidth: 96 },
-      },
-        createElement('option', { value: 'mine' }, '我的 Bug'),
-        createElement('option', { value: 'project' }, '项目')),
-      scope === 'project'
-        ? createElement('select', {
-            'data-zentao-project': '1',
-            title: '选择项目（列表来自禅道项目索引）',
-            value: projectID,
-            onChange: (event: { target: { value: string } }) => setProjectID(event.target.value),
-            style: { flex: 1, minWidth: 120 },
-          },
-          createElement('option', { value: '' }, projects.length === 0 ? '（加载项目…）' : '选择项目…'),
-          ...projects.map((project) => createElement('option', { key: project.id, value: project.id }, `${project.name}（${project.id}）`)))
-        : null,
-      createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1, minWidth: 88 } },
-        createElement('option', { value: 'open' }, '未解决'),
-        createElement('option', { value: 'all' }, '全部')),
-      createElement('select', {
-        'data-zentao-sort': '1',
-        title: '排序（服务端排序，值经宿主白名单校验）',
-        value: orderBy,
-        onChange: (event: { target: { value: string } }) => setOrderBy(event.target.value),
-        style: { flex: 1, minWidth: 132 },
-      },
-        createElement('option', { value: 'id_desc' }, 'ID（新→旧）'),
-        createElement('option', { value: 'id_asc' }, 'ID（旧→新）'),
-        createElement('option', { value: 'openedDate_desc' }, '创建时间（新→旧）'),
-        createElement('option', { value: 'openedDate_asc' }, '创建时间（旧→新）'),
-        createElement('option', { value: 'severity_asc' }, '级别（高→低）'),
-        createElement('option', { value: 'severity_desc' }, '级别（低→高）'),
-        createElement('option', { value: 'pri_asc' }, '优先级（高→低）'),
-        createElement('option', { value: 'pri_desc' }, '优先级（低→高）')),
-      createElement('select', { value: String(intervalMin), onChange: (event: { target: { value: string } }) => setIntervalMin(Number(event.target.value)), title: '自动刷新间隔' },
-        createElement('option', { value: '1' }, '1 分钟'),
-        createElement('option', { value: '5' }, '5 分钟'),
-        createElement('option', { value: '15' }, '15 分钟'),
-        createElement('option', { value: '30' }, '30 分钟'),
-        createElement('option', { value: '0' }, '不自动')),
-      createElement('span', { style: { fontSize: 11, color: TOKEN.dim } },
-        [
-          scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
-          bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
-        ].filter((part) => part !== '').join(' · ')),
-      createElement('label', { style: { display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, color: TOKEN.dim } },
-        createElement('input', {
-          type: 'checkbox',
-          'data-zentao-check-all': '1',
-          checked: visibleBugs.length > 0 && visibleBugs.every((bug) => checked.includes(bug.id)),
-          onChange: () => {
-            const ids = visibleBugs.map((bug) => bug.id)
-            const allIn = ids.every((id) => checked.includes(id))
-            setChecked(allIn ? checked.filter((id) => !ids.includes(id)) : [...new Set([...checked, ...ids])])
-          },
-          style: { cursor: 'pointer', margin: 0 },
-        }), '全选'),      createElement('button', {
-        type: 'button',
-        'data-zentao-action': 'refresh',
-        title: '刷新状态、列表、打开的详情与已生成的计划',
-        onClick: () => void refreshAll(true),
-        style: { cursor: 'pointer' },
-      }, busy === 'all' || busy === 'bugs' ? '刷新中…' : '刷新')))
+    if (tab === 'bugs') {
+      const sortField = orderBy.split('_')[0] ?? 'id'
+      const sortAsc = orderBy.endsWith('_asc')
+      const sortLabel = (field: string): string => field === 'id'
+        ? 'ID'
+        : field === 'openedDate' ? '创建时间' : field === 'severity' ? '级别' : '优先级'
+      // 级别/优先级 "升序" 在这台实例上表示"高的在前"，tooltip 里说明白，免得误导。
+      const dirHint = sortField === 'severity' || sortField === 'pri'
+        ? (sortAsc ? '高 → 低' : '低 → 高')
+        : (sortAsc ? '旧 → 新' : '新 → 旧')
+      const allOn = visibleBugs.length > 0 && visibleBugs.every((bug) => checked.includes(bug.id))
+      body.push(createElement('div', { key: 'toolbar', className: 'zt-toolbar' },
+        createElement('select', {
+          'data-zentao-scope': '1',
+          className: 'zt-field',
+          title: '范围：我的 Bug，或某个项目里的 Bug',
+          value: scope,
+          onChange: (event: { target: { value: string } }) => setScope(event.target.value === 'project' ? 'project' : 'mine'),
+        },
+          createElement('option', { value: 'mine' }, '我的 Bug'),
+          createElement('option', { value: 'project' }, '项目')),
+        scope === 'project'
+          ? createElement('select', {
+              'data-zentao-project': '1',
+              className: 'zt-field',
+              title: '选择项目（列表来自禅道项目索引）',
+              value: projectID,
+              onChange: (event: { target: { value: string } }) => setProjectID(event.target.value),
+              style: { flex: 1, minWidth: 120 },
+            },
+            createElement('option', { value: '' }, projects.length === 0 ? '（加载项目…）' : '选择项目…'),
+            ...projects.map((project) => createElement('option', { key: project.id, value: project.id }, `${project.name}（${project.id}）`)))
+          : null,
+        createElement('select', {
+          className: 'zt-field',
+          title: '只看未解决，或全部',
+          value: only,
+          onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'),
+        },
+          createElement('option', { value: 'open' }, '未解决'),
+          createElement('option', { value: 'all' }, '全部')),
+        // 排序拆成"字段 + 方向"：原来 8 个选项里一半是同字段的另一个方向，
+        // 选起来费眼；方向按钮还能一眼看出当前朝哪边。
+        createElement('select', {
+          'data-zentao-sort': '1',
+          className: 'zt-field',
+          title: '排序字段（服务端排序，值经宿主白名单校验）',
+          value: sortField,
+          onChange: (event: { target: { value: string } }) => setOrderBy(`${event.target.value}_${sortAsc ? 'asc' : 'desc'}`),
+        },
+          ...['id', 'openedDate', 'severity', 'pri'].map((field) =>
+            createElement('option', { key: field, value: field }, sortLabel(field)))),
+        createElement('button', {
+          type: 'button',
+          'data-zentao-action': 'sort-dir',
+          className: 'zt-btn',
+          title: `排序方向：${dirHint}（点击切换）`,
+          onClick: () => setOrderBy(`${sortField}_${sortAsc ? 'desc' : 'asc'}`),
+        }, sortAsc ? '↑' : '↓'),
+        createElement('select', {
+          className: 'zt-field',
+          title: '自动刷新间隔',
+          value: String(intervalMin),
+          onChange: (event: { target: { value: string } }) => setIntervalMin(Number(event.target.value)),
+        },
+          createElement('option', { value: '1' }, '1 分钟'),
+          createElement('option', { value: '5' }, '5 分钟'),
+          createElement('option', { value: '15' }, '15 分钟'),
+          createElement('option', { value: '30' }, '30 分钟'),
+          createElement('option', { value: '0' }, '不自动')),
+        createElement('span', { className: 'zt-toolbar-note' },
+          [
+            scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
+            bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
+          ].filter((part) => part !== '').join(' · ')),
+        createElement('label', {
+          className: allOn ? 'zt-checkall zt-checkall-on' : 'zt-checkall',
+          title: '全选/取消当前可见的行',
+        },
+          createElement('input', {
+            type: 'checkbox',
+            'data-zentao-check-all': '1',
+            checked: allOn,
+            onChange: () => {
+              const ids = visibleBugs.map((bug) => bug.id)
+              const allIn = ids.every((id) => checked.includes(id))
+              setChecked(allIn ? checked.filter((id) => !ids.includes(id)) : [...new Set([...checked, ...ids])])
+            },
+          }),
+          createElement('span', null, allOn ? '已全选' : '全选')),
+        createElement('button', {
+          type: 'button',
+          'data-zentao-action': 'refresh',
+          className: 'zt-btn',
+          title: `刷新状态、列表、详情与计划（自动刷新：${intervalMin === 0 ? '关闭' : `${intervalMin} 分钟`}）`,
+          onClick: () => void refreshAll(true),
+        }, busy === 'all' || busy === 'bugs' ? '↻ 刷新中…' : '↻ 刷新')))
+    }
 
-    // Only the active tab renders: the list and the detail card used to stay
-    // mounted under the task tab (found in the browser harness).
     if (tab === 'bugs' && checked.length > 0) {
       body.push(createElement('div', {
         key: 'batch',
         'data-zentao-batch': '1',
-        style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 12px', borderBottom: `1px solid ${TOKEN.line}`, background: 'rgba(37,99,235,.06)' },
+        className: 'zt-batch',
       },
-      createElement('span', { style: { fontSize: 12, fontWeight: 600 } }, `已选 ${checked.length} 条`),
-      createElement('button', { type: 'button', 'data-zentao-action': 'batch-preview', title: '对每条跑一次解决计划（只读，不提交），汇总哪些可提交、哪些被拦', onClick: () => void batchPreview(), style: { cursor: 'pointer' } }, '批量预览'),
-      createElement('button', { type: 'button', 'data-zentao-action': 'batch-resolve', title: '逐条提交解决（会二次确认并列出单号；每条都回读状态确认）', onClick: () => void batchResolve(), style: { cursor: 'pointer', fontWeight: 600, borderColor: TOKEN.accent, color: TOKEN.accent } }, '批量解决…'),
-      createElement('button', { type: 'button', 'data-zentao-action': 'batch-quote', title: '新建一个会话，把这 N 条的引用一起发过去（不写禅道）', onClick: () => void batchQuote(), style: { cursor: 'pointer' } }, '批量引用到会话'),
-      createElement('button', { type: 'button', onClick: () => setChecked([]), style: { cursor: 'pointer' } }, '清空选择'),
-      batchProgress === '' ? null : createElement('span', { style: { fontSize: 11, color: TOKEN.dim } }, batchProgress)))
+      // Short labels + tooltips: four long labels wrapped onto two lines in a
+      // 384px pane, pushing the list down every time something was ticked.
+      createElement('span', { className: 'zt-batch-count' }, `已选 ${checked.length}`),
+      createElement('button', { type: 'button', className: 'zt-btn', 'data-zentao-action': 'batch-preview', title: '批量预览：对每条跑一次解决计划（只读，不提交），汇总哪些可提交、哪些被拦', onClick: () => void batchPreview() }, '预览'),
+      createElement('button', { type: 'button', className: 'zt-btn zt-btn-primary', 'data-zentao-action': 'batch-resolve', title: '批量解决：逐条提交（会二次确认并列出单号；每条都回读状态确认）', onClick: () => void batchResolve() }, '解决'),
+      createElement('button', { type: 'button', className: 'zt-btn', 'data-zentao-action': 'batch-quote', title: '批量引用到会话：新建一个会话，把这 N 条的引用一起发过去（不写禅道）', onClick: () => void batchQuote() }, '引用'),
+      batchProgress === '' ? null : createElement('span', { className: 'zt-chip' }, batchProgress),
+      createElement('button', {
+        type: 'button',
+        className: 'zt-batch-clear',
+        'data-zentao-action': 'batch-clear',
+        title: '清空选择',
+        onClick: () => setChecked([]),
+      }, '✕')))
     }
 
     if (tab === 'bugs') {

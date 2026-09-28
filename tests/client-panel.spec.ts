@@ -339,7 +339,12 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
 
     const sort = find(tree, (element) => element.props['data-zentao-sort'] === '1')!
     expect(sort).toBeDefined()
-    ;(sort.props.onChange as (event: unknown) => void)({ target: { value: 'severity_asc' } })
+    // Sort is「字段 + 方向」now: pick the field, then flip the direction button.
+    ;(sort.props.onChange as (event: unknown) => void)({ target: { value: 'severity' } })
+    tree = await settle()
+    expect(orders).toContain('severity_desc')
+    const dir = find(tree, (element) => element.props['data-zentao-action'] === 'sort-dir')!
+    ;(dir.props.onClick as () => void)()
     await settle()
     expect(orders).toContain('severity_asc')
   })
@@ -462,7 +467,8 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     tree = await settle()
     tick('22')
     tree = await settle()
-    expect(textOf(tree).join(' ')).toContain('已选 2 条')
+    // Batch bar labels are compact now (「已选 2」+ 预览/解决/引用).
+    expect(textOf(tree).join(' ')).toContain('已选 2')
 
     // 批量预览 → one plan per ticked bug.
     const preview = find(tree, (element) => element.props['data-zentao-action'] === 'batch-preview')!

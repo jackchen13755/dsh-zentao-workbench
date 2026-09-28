@@ -196,7 +196,13 @@ function methodsOf(target: object): string {
  * and discovering it is absent (which is how this flow failed three times).
  */
 function scopeFor(sessions: SessionsFace, sessionId: string): ScopedLike | undefined {
+  // Measured on the user's build: `scope` exists yet returns undefined for a
+  // freshly created session (it is not materialised), and the service also
+  // exposes `materializeScope` / `scopeOf`. So materialise first, then try every
+  // route that can hand back a scoped context.
+  callIfPresent(sessions, 'materializeScope', sessionId)
   const direct = callIfPresent(sessions, 'scope', sessionId)?.value
+    ?? callIfPresent(sessions, 'scopeOf', sessionId)?.value
   if (direct !== undefined) return direct as ScopedLike
   for (const route of ['sessionOf', 'binding'] as const) {
     const held = callIfPresent(sessions, route, sessionId)?.value as
@@ -208,6 +214,20 @@ function scopeFor(sessions: SessionsFace, sessionId: string): ScopedLike | undef
     if (held.context !== undefined) return held.context
   }
   return undefined
+}
+
+/** The `conversation` service behind a scope/binding, when it is reachable. */
+function conversationOf(scope: unknown): { send(text: string): Promise<unknown> } | undefined {
+  const get = (scope as { get?: unknown } | undefined)?.get
+  if (typeof get !== 'function') return undefined
+  try {
+    const conversation = (get as (name: string) => unknown).call(scope, 'conversation') as { send?: unknown } | undefined
+    return typeof conversation?.send === 'function'
+      ? (conversation as { send(text: string): Promise<unknown> })
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspaces?: WorkspacesFace }, ctx: ClientContext) {
@@ -263,9 +283,31 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
     callIfPresent(sessions, 'open', sessionId)
     const scoped = scopeFor(sessions, sessionId)
     if (scoped === undefined) {
-      throw new Error(`新建会话失败：拿不到会话作用域。当前 sessions 暴露的方法：${methodsOf(sessions)}`)
+      // Documented fallback: "sessions.using(target, options, operation) waits for
+      // that settlement, holds its reference until the callback settles". The
+      // binding arrives inside the callback, so the send happens there.
+      const using = (sessions as unknown as Record<string, unknown>).using
+      if (typeof using !== 'function') {
+        throw new Error(`拿不到会话作用域，无法发送。当前 sessions 暴露的方法：${methodsOf(sessions)}`)
+      }
+      let sent = false
+      const runUsing = using as unknown as (
+        id: string,
+        options: object,
+        run: (binding?: unknown) => Promise<void>,
+      ) => Promise<void>
+      await runUsing.call(sessions, sessionId, {}, async (binding?: unknown) => {
+        const conversation = conversationOf(binding) ?? conversationOf(scopeFor(sessions, sessionId))
+        if (conversation === undefined) return
+        await conversation.send(text)
+        sent = true
+      })
+      if (!sent) {
+        throw new Error(`using() 里也没拿到 conversation。当前 sessions 暴露的方法：${methodsOf(sessions)}`)
+      }
+      return
     }
-    const conversation = scoped.get('conversation')
+    const conversation = conversationOf(scoped)
     if (conversation === undefined) throw new Error('conversation 服务不可用，请确认 Web 对话插件已加载')
     await conversation.send(text)
   }

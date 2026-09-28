@@ -1,0 +1,51 @@
+{
+  "name": "dsh-zentao-workbench",
+  "version": "0.1.0",
+  "description": "ZenTao (classic index.php era, e.g. 10.6) workbench for DeepSeek Harness: browser-bridge-first session, my-bug list, and a single-shot bug context that removes the resolve-form guesswork (254 build options / 892 member options / HTTP-200 alerts).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "zentao",
+    "禅道",
+    "workbench"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.2.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackchen13755/dsh-zentao-workbench.git"
+  }
+}

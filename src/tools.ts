@@ -120,6 +120,35 @@ export function createTools(deps: ToolDeps): unknown[] {
     }),
 
     defineTool({
+      name: 'zentao_tasks',
+      description: '列出项目任务（/index.php?m=project&f=task）。本实例的任务模块没有数据（实测 8 个项目全部为空），因此常见结果是空列表 + 一句如实说明，而不是解析失败。',
+      parameters: {
+        projectID: { type: 'string', description: '项目 ID；缺省用实例默认项目' },
+        limit: { type: 'number', description: '返回条数上限，默认 30' },
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: true, properties: { text: { type: 'string' } } },
+        render: (_args, value) => text(String((value as { text?: string }).text ?? '')),
+      },
+      async execute(args): Promise<{ text: string }> {
+        const a = args as { projectID?: string, limit?: number }
+        try {
+          const result = await workbench.myTasks({ projectID: a.projectID, limit: a.limit })
+          const lines = [`任务（${result.tasks.length}/${result.total}，经「${result.via}」）${result.projectID !== undefined ? ` · 项目 ${result.projectID}` : ''}`]
+          for (const task of result.tasks) {
+            lines.push(`  ${task.id}  ${task.name}  [${task.status || '-'}] ← ${task.assignedTo || '-'}`)
+          }
+          if (result.tasks.length === 0) lines.push(`  ${result.note}`)
+          return { text: lines.join('\n') }
+        } catch (error) {
+          const failure = authFailure(error)
+          if (failure) return failure
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
       name: 'zentao_bug_context',
       description: '一次取全一条 Bug 的上下文：详情（标题/产品/状态/指派）+ 解决表单的 uid、必填项、默认值、枚举可选值，以及最近动态。替代「反复读页面猜字段」——254 个解决版本选项只回传你点名匹配的那几个，892 项的人员下拉只回传当前选中值。',
       parameters: {

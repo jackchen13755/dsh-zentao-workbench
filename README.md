@@ -46,7 +46,7 @@
 |---|---|
 | `zentao_session_status` | 登录态与四策略探测结果（任何工具报未登录时先看它） |
 | `zentao_my_bugs` | 我的 Bug 列表（结构化，不回传 HTML；`only=open/resolved`） |
-| `zentao_tasks`* | 项目任务列表（`m=project&f=task`）。**实测本实例 8 个项目全部无任务** → 空态如实说明；行解析未在真实数据上验证（见下） |
+| `zentao_tasks` | 项目任务列表（`m=project&f=task`）。**实测本实例 8 个项目全部无任务** → 空态如实说明；行解析未在真实数据上验证（见下） |
 | `zentao_bug_context` | 一次读全一条单的解决上下文 |
 | `zentao_resolve_bug` | 解决：计划 → 本地校验 → 提交 → 回读验证（建议先 `dryRun`） |
 

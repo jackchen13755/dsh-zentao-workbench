@@ -6,14 +6,17 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "lib/client.js",
     "bin",
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.build.json --noEmit",
     "test": "vitest run",
-    "zentao": "node bin/zentao.mjs"
+    "zentao": "node bin/zentao.mjs",
+    "build:host": "tsc -p tsconfig.build.json",
+    "build:client": "tsc -p tsconfig.client.build.json && node scripts/bundle-client.mjs"
   },
   "keywords": [
     "dsh-plugin",
@@ -25,6 +28,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
     }
   },
   "peerDependencies": {
@@ -52,5 +62,14 @@
   },
   "bin": {
     "zentao": "./bin/zentao.mjs"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
   }
 }

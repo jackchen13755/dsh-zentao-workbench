@@ -164,9 +164,50 @@ function callIfPresent(target: object, name: string, ...args: unknown[]): { valu
   return { value: (fn as (...a: unknown[]) => unknown).apply(target, args) }
 }
 
-/** The callable surface, for error messages that carry their own evidence. */
+/**
+ * The callable surface, for error messages that carry their own evidence.
+ *
+ * Walks the prototype chain: a cordis service exposes its methods there, so
+ * `Object.keys` reported "(无)" for an object that demonstrably had `create`.
+ */
 function methodsOf(target: object): string {
-  return Object.keys(target).filter((key) => typeof (target as Record<string, unknown>)[key] === 'function').join(', ') || '(无)'
+  const names = new Set<string>()
+  let current: object | null = target
+  while (current !== null && current !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(current)) {
+      if (key === 'constructor') continue
+      try {
+        if (typeof (target as Record<string, unknown>)[key] === 'function') names.add(key)
+      } catch {
+        // a getter that throws is not a capability
+      }
+    }
+    current = Object.getPrototypeOf(current) as object | null
+  }
+  return [...names].sort().join(', ') || '(无)'
+}
+
+/**
+ * A session-scoped context on whichever route this build offers.
+ *
+ * `sessions.scope(id)` is the documented one (and is used by other installed
+ * plugins), but the session controller also exposes `sessionOf`/`binding`, any of
+ * which may hand back the scoped context. Trying them in order beats picking one
+ * and discovering it is absent (which is how this flow failed three times).
+ */
+function scopeFor(sessions: SessionsFace, sessionId: string): ScopedLike | undefined {
+  const direct = callIfPresent(sessions, 'scope', sessionId)?.value
+  if (direct !== undefined) return direct as ScopedLike
+  for (const route of ['sessionOf', 'binding'] as const) {
+    const held = callIfPresent(sessions, route, sessionId)?.value as
+      | { scope?: (id: string) => ScopedLike, context?: ScopedLike }
+      | undefined
+    if (held === undefined) continue
+    const viaScope = callIfPresent(held, 'scope', sessionId)?.value
+    if (viaScope !== undefined) return viaScope as ScopedLike
+    if (held.context !== undefined) return held.context
+  }
+  return undefined
 }
 
 function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspaces?: WorkspacesFace }, ctx: ClientContext) {
@@ -220,9 +261,9 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
     // no `sessions.open` (user report) while the reference build does. Probe it
     // and carry on — `sessions.create` already registers the session.
     callIfPresent(sessions, 'open', sessionId)
-    const scoped = callIfPresent(sessions, 'scope', sessionId)?.value as ScopedLike | undefined
+    const scoped = scopeFor(sessions, sessionId)
     if (scoped === undefined) {
-      throw new Error(`新建会话失败：sessions.scope 不可用。当前 sessions 暴露的方法：${methodsOf(sessions)}`)
+      throw new Error(`新建会话失败：拿不到会话作用域。当前 sessions 暴露的方法：${methodsOf(sessions)}`)
     }
     const conversation = scoped.get('conversation')
     if (conversation === undefined) throw new Error('conversation 服务不可用，请确认 Web 对话插件已加载')

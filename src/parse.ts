@@ -343,6 +343,12 @@ export interface BugDetail {
   storyID: string
   /** 所属项目 label — empty for bugs that are not project-scoped. */
   projectLabel: string
+  /**
+   * The bug's description as sanitised HTML (the page's
+   * `.detail-content.article-content` blocks), so the panel can render tables,
+   * lists and images instead of showing raw tags.
+   */
+  descriptionHtml: string
 }
 
 /** Ported status probe: `<th>Bug状态</th><td><span>…</span></td>`. */
@@ -359,6 +365,36 @@ export function lastResolvedBuild(html: string): string {
   let build = ''
   for (const m of html.matchAll(re)) if (m[2]) build = m[2]
   return build
+}
+
+/**
+ * The description blocks of a bug page, as HTML.
+ *
+ * Measured markup: `<div class="detail-content article-content" …>…</div>`.
+ */
+export function extractDescription(html: string): string {
+  const blocks: string[] = []
+  for (const m of html.matchAll(/<div[^>]*class=(['"])[^'"]*detail-content[^'"]*\1[^>]*>([\s\S]*?)<\/div>/g)) {
+    const body = (m[2] ?? '').trim()
+    if (body !== '') blocks.push(body)
+  }
+  return blocks.join('\n')
+}
+
+/**
+ * Strip the parts of untrusted ticket HTML that must never reach the DOM.
+ *
+ * Advisory only — the panel renders the result, so this removes script/style
+ * blocks, event handlers and `javascript:` URLs. Everything else is kept,
+ * because tables/lists/images are the point of showing HTML at all.
+ */
+export function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    .replace(/(href|src)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
 }
 
 /**
@@ -403,6 +439,7 @@ export function parseBugView(html: string, bugID: string): BugDetail {
       new RegExp(`<th[^>]*>\\s*相关需求\\s*</th>\\s*<td[^>]*>([\\s\\S]{0,300}?)</td>`).exec(html)?.[1] ?? '',
     )?.[1] ?? '',
     projectLabel: labelledField(html, '所属项目'),
+    descriptionHtml: sanitizeHtml(extractDescription(html)),
   }
 }
 
@@ -416,7 +453,10 @@ export function parseHistories(html: string, limit = 5): string[] {
   const list = html.match(/<ol\b[^>]*class=(['"])[^'"]*histories-list[^'"]*\1[^>]*>([\s\S]*?)<\/ol>/)
   if (!list) return []
   const items = [...(list[2] ?? '').matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/g)]
-    .map((m) => decodeEntities(m[1] ?? ''))
+    // Sanitised, not stripped: the panel renders these as HTML so a diff's
+    // <a>/<strong> shows as formatting instead of as tag text (measured: one of
+    // bug 55004's five entries carries markup).
+    .map((m) => sanitizeHtml(decodeEntities(m[1] ?? '')).replace(/\s+/g, ' ').trim())
     .filter((text) => text !== '')
   return items.slice(-limit)
 }

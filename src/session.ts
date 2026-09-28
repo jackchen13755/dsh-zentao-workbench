@@ -427,6 +427,63 @@ export class ZenTaoSession {
     }
   }
 
+  /**
+   * Raw bytes for a same-origin attachment/image.
+   *
+   * The browser half has no ZenTao session, so images have to be proxied. Only
+   * the cookie-carrying strategies can do it: the relay returns decoded text,
+   * not bytes, so `bridge` is skipped.
+   */
+  async fetchBinary(pathOrUrl: string): Promise<{ contentType: string, base64: string, strategy: StrategyId }> {
+    const url = this.url(pathOrUrl)
+    if (new URL(url).origin !== new URL(this.url('/')).origin) {
+      throw new Error(`只允许代理本实例的图片：${url}`)
+    }
+    const attempts: StrategyProbe[] = []
+    for (const strategy of this.order()) {
+      if (strategy === 'bridge') continue
+      if (strategy === 'form-login' && !(await this.ensureRuntimeCookie())) continue
+      const cookie = strategy === 'form-login'
+        ? this.runtimeCookie
+        : strategy === 'manual'
+          ? (this.env.ZENTAO_COOKIE ?? '').trim()
+          : (await this.jar())?.cookieHeader ?? ''
+      if (cookie === '') {
+        attempts.push(failureProbe(strategy, '没有可用的 Cookie'))
+        continue
+      }
+      try {
+        const response = await fetch(url, {
+          headers: { cookie, 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
+          redirect: 'follow',
+        })
+        if (!response.ok) {
+          attempts.push(failureProbe(strategy, `HTTP ${response.status}`))
+          continue
+        }
+        const buffer = Buffer.from(await response.arrayBuffer())
+        // A pasted screenshot can be megabytes; refuse politely instead of
+        // pushing a huge data URL through the panel transport.
+        if (buffer.byteLength > 6 * 1024 * 1024) {
+          throw new Error(`图片太大（${Math.round(buffer.byteLength / 1024)} KB），已跳过代理`)
+        }
+        return {
+          contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+          base64: buffer.toString('base64'),
+          strategy,
+        }
+      } catch (error) {
+        attempts.push(failureProbe(strategy, (error as Error).message))
+      }
+    }
+    throw new ZenTaoAuthError(`取不到图片（${url}）`, {
+      server: this.server,
+      serverSource: this.serverSource,
+      authenticated: false,
+      probes: attempts,
+    })
+  }
+
   private async fetchVia(strategy: StrategyId, url: string, init: { method: 'GET' | 'POST', body?: string, headers?: Record<string, string> }, signal?: AbortSignal): Promise<PageResult> {
     if (strategy === 'bridge') {
       const res = await bridgeForward({

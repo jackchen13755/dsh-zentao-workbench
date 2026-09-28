@@ -61,6 +61,8 @@ interface BugContext {
     severity?: string, severityLevel?: number | null
     /** Detail-page fields (may be absent on an older host build). */
     productLabel?: string, story?: string, storyID?: string, projectLabel?: string
+    /** Sanitised description HTML (tables/lists/images), rendered as HTML. */
+    descriptionHtml?: string
   }
   resolve: {
     uid: string
@@ -120,10 +122,26 @@ function severityBadge(label: string, level: number | null | undefined): ReactNo
   }, text)
 }
 
+/**
+ * The discipline every preset repeats.
+ *
+ * It is in the prompt on purpose: a model that starts from the pasted reference
+ * alone tends to guess at the resolve form (that is what cost the old flow ~42
+ * retries), so each preset tells it to read the context first, plan before
+ * posting, and not leave the auto-filled placeholder in the ticket.
+ */
+const DISCIPLINE = [
+  '工作纪律（按顺序）：',
+  '1. 先用 zentao_bug_context 读该单**最新**详情（引用里的状态可能已过期；必要时 refresh=true）；',
+  '2. 改单只用 zentao_resolve_bug：**先 dryRun:true 预览**，确认无误再去掉 dryRun 提交；不要手写 POST；',
+  '3. 提交前把 detail_reason 与 changeImpact 换成**真实**内容 —— 插件会自动兜底，但兜底文案会留在单子里。',
+].join('\n')
+
 const ROLE_PRESETS: Array<{ key: string, label: string, prompt: (reference: string) => string }> = [
-  { key: 'dev', label: '开发', prompt: (ref) => `${ref}\n\n请按开发角度处理这个 Bug：先复现、定位根因、给出最小改动修复并自测，必要时补充用例。` },
-  { key: 'qa', label: '测试', prompt: (ref) => `${ref}\n\n请按测试角度处理：核对修复是否覆盖原始复现步骤，列出回归范围与验证步骤。` },
-  { key: 'pm', label: '产品', prompt: (ref) => `${ref}\n\n请按产品角度处理：确认预期行为与验收标准，指出需求或交互上需要澄清的点。` },
+  { key: 'fix', label: '一键修复', prompt: (ref) => `${ref}\n\n请直接修复这个 Bug：先复现并定位根因（信息不足就明确说缺什么，别猜），给出最小改动修复并自测（能跑测试就跑）。\n\n${DISCIPLINE}` },
+  { key: 'dev', label: '开发', prompt: (ref) => `${ref}\n\n请按**开发**角度处理：复现 → 定位根因 → 最小改动修复 → 自测（必要时补用例）。\n\n${DISCIPLINE}` },
+  { key: 'qa', label: '测试', prompt: (ref) => `${ref}\n\n请按**测试**角度处理：核对修复是否覆盖原始复现步骤，列出回归范围与可执行的验证步骤。\n\n${DISCIPLINE}` },
+  { key: 'pm', label: '产品', prompt: (ref) => `${ref}\n\n请按**产品**角度处理：确认预期行为与验收标准，指出需求/交互上需要澄清的点。\n\n${DISCIPLINE}` },
 ]
 
 /**
@@ -188,6 +206,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [checked, setChecked] = useState<string[]>([])
   /** Progress of a running batch, e.g. `2/5 提交中`. */
   const [batchProgress, setBatchProgress] = useState('')
+  /** Description HTML with its images already inlined as data URLs. */
+  const [richDescription, setRichDescription] = useState('')
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [projectID, setProjectID] = useState('')
   const [intervalMin, setIntervalMin] = useState(5)
@@ -345,6 +365,40 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       return terms.every((term) => haystack.includes(term))
     })
   }, [bugs, search])
+
+  /**
+   * Turn the ticket's description HTML into something the panel can render.
+   *
+   * Two jobs: (1) render tags instead of showing them as text, (2) inline the
+   * images — they need the ZenTao session, which only the host has, so each one
+   * is fetched through the `image` endpoint and swapped in as a data URL. A
+   * failure leaves the original `src` in place rather than dropping the picture
+   * silently.
+   */
+  useEffect(() => {
+    const html = selected?.bug.descriptionHtml ?? ''
+    if (html.trim() === '') {
+      setRichDescription('')
+      return undefined
+    }
+    let cancelled = false
+    void (async () => {
+      // Keep images inside the pane regardless of how wide they were pasted.
+      let out = html.replace(/<img\b/gi, '<img style="max-width:100%;height:auto" ')
+      const sources = [...out.matchAll(/<img[^>]*\bsrc=(['"])([^'"]+)\1/gi)].map((match) => match[2] ?? '')
+      for (const source of new Set(sources)) {
+        if (source.startsWith('data:')) continue
+        try {
+          const value = await call('image', { url: absoluteUrl(config?.server ?? '', source) }) as { dataUrl: string }
+          out = out.split(`"${source}"`).join(`"${value.dataUrl}"`).split(`'${source}'`).join(`'${value.dataUrl}'`)
+        } catch {
+          // leave it: the alt text / broken-image icon still tells the user there was one
+        }
+      }
+      if (!cancelled) setRichDescription(out)
+    })()
+    return () => { cancelled = true }
+  }, [selected, config?.server, call])
 
   const openDetail = useCallback(async (bugID: string) => {
     setBusy(`detail:${bugID}`)
@@ -809,8 +863,27 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           `必填：${selected.resolve.fields.filter((field) => field.required).map((field) => field.label).join('、')}`),
         createElement('div', { style: { fontSize: 12, color: TOKEN.dim, marginTop: 2 } },
           `下拉规模 ${selected.resolve.optionCounts.resolvedBuild}/${selected.resolve.optionCounts.bugInchargedBy}/${selected.resolve.optionCounts.assignedTo}（已收敛）`),
+        ...(richDescription.trim() === ''
+          ? []
+          : [createElement('div', { key: 'desc', style: { marginTop: 8 } },
+              createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginBottom: 2 } }, '描述（富文本，图片已内联）'),
+              createElement('div', {
+                // Sanitised host-side (scripts/handlers/javascript: removed) and
+                // rendered as HTML so tables, lists and screenshots show properly.
+                'data-zentao-description': '1',
+                dangerouslySetInnerHTML: { __html: richDescription },
+                style: { fontSize: 12, lineHeight: 1.6, border: `1px solid ${TOKEN.line}`, borderRadius: 6, padding: '8px 10px', overflowX: 'auto' },
+              }, null))]),
         ...(selected.histories.length > 0
-          ? [createElement('div', { key: 'hist', style: { marginTop: 6, fontSize: 12, color: TOKEN.dim } }, ...selected.histories.map((line, index) => createElement('div', { key: index }, `· ${line}`)))]
+          ? [createElement('div', { key: 'hist', style: { marginTop: 6, fontSize: 12, color: TOKEN.dim } },
+              createElement('div', { style: { fontSize: 11, marginBottom: 2 } }, '最近动态（按 HTML 渲染）'),
+              ...selected.histories.map((line, index) => createElement('div', {
+                key: index,
+                // Rendered, not escaped: the host already stripped scripts and
+                // handlers, and the point is that a diff's markup shows as markup.
+                dangerouslySetInnerHTML: { __html: `· ${line}` },
+                style: { marginBottom: 2 },
+              }, null)))]
           : []),
         createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } },
           '要解决这条 Bug：点「① 预览解决计划」看清将要提交的字段，再点「② 确认并提交解决」（会二次确认）。'),
@@ -824,7 +897,25 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             onClick: () => void previewPlan(selected.bug.id),
             style: { cursor: 'pointer', fontWeight: 600, borderColor: TOKEN.accent, color: TOKEN.accent },
           }, busy === 'plan' ? '生成中…' : '① 预览解决计划'),
-          ...ROLE_PRESETS.map((role) => createElement('button', {
+          // 「一键修复」 is the one people press most, so it leads and is styled as
+          // the primary action of the card.
+          createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'one-click-fix',
+            title: '新建会话并把这条 Bug 连同「复现→定位→最小修复→自测→先 dryRun 再提交」的提示词一次发出',
+            style: { cursor: 'pointer', fontWeight: 600 },
+            onClick: async () => {
+              const preset = ROLE_PRESETS.find((role) => role.key === 'fix')!
+              try {
+                await deps.handlePrompt(preset.prompt(referenceOf(selected.bug)))
+                setFlash('已新建会话并发出修复请求')
+              } catch (problem) {
+                setError((problem as Error).message)
+              }
+            },
+          }, '🚀 一键修复'),
+
+          ...ROLE_PRESETS.filter((role) => role.key !== 'fix').map((role) => createElement('button', {
             key: role.key,
             type: 'button',
             // Each one opens a NEW conversation in the current workspace and sends

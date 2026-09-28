@@ -92,6 +92,9 @@
           : { ok: true, value: { server: 'https://zentao.example.com', serverSource: 'config', authenticated: true, strategy: 'bridge', probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（以实测为准）' }], config: { server: 'https://zentao.example.com', authenticated: true, probes: [] } } }
       case 'listBugs':
         return { ok: true, value: { bugs: BUGS, total: BUGS.length, truncated: false, via: 'bridge', url: 'https://zentao.example.com/index.php?m=my&f=bug', fetchedAt: new Date().toISOString(), cached: false } }
+      case 'image':
+        // 1x1 透明 PNG：证明面板把 <img src> 换成了宿主代理回来的 data URL
+        return { ok: true, value: { dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', via: 'cookie-jar' } }
       case 'listProjects':
         return { ok: true, value: { projects: [{ id: '187', name: 'Upsell STUAT' }, { id: '213', name: 'SPMS UAT' }], via: 'bridge', url: '', fetchedAt: new Date().toISOString() } }
       case 'listTasks':
@@ -99,7 +102,7 @@
           note: '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败' } }
       case 'bugContext':
         return { ok: true, value: {
-          bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', productLabel: 'Service360', status: '激活', assignedTo: 'Dev One', severity: '主要', severityLevel: 3, story: '#3982 GReAT优化', storyID: '3982', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
+          bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', productLabel: 'Service360', status: '激活', assignedTo: 'Dev One', severity: '主要', severityLevel: 3, story: '#3982 GReAT优化', storyID: '3982', descriptionHtml: "<p><strong>复现步骤</strong></p><ul><li>打开查询条件</li><li>点击 location</li></ul><p><img src='/index.php?m=file&f=read&t=png&fileID=96019' /></p>", url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
           resolve: {
             uid: 'kuid-harness',
             fields: [
@@ -115,7 +118,7 @@
             buildMatches: [],
             optionCounts: { resolvedBuild: 254, bugInchargedBy: 892, assignedTo: 892 },
           },
-          histories: ['2026-08-18 16:27:16, 由 Reporter One 创建。'],
+          histories: ['2026-08-18 16:27:16, 由 Reporter One 创建。', '2026-08-17 10:49:51, 由 Yanping Wang 编辑。修改了 <strong>所属产品</strong>，旧值为 "25"，新值为 "15"。'],
           cachedAt: new Date().toISOString(), cached: false,
         } }
       case 'resolvePlan':
@@ -159,7 +162,10 @@
         ? { register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined } }
         : undefined),
     }),
-    get: (name) => (name === 'betterSidebar' ? { openTab: (tab) => { window.__HARNESS__.openedTab = tab } } : undefined),
+    // No `betterSidebar` here: the entry then falls back to the floating drawer,
+    // which is what the harness exercises. The sidebar path (openTab) is pinned
+    // by the unit test instead.
+    get: () => undefined,
     // cordis calls the effect body; the seat registrations live inside one, so a
     // no-op stub here would silently skip them (it did).
     effect: (callback) => { const dispose = callback(); return dispose },

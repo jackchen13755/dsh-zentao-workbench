@@ -113,6 +113,20 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
           return { ok: true, value: result }
         }
 
+        case 'image': {
+          // The browser half has no ZenTao session, so images (screenshots pasted
+          // into a ticket) are proxied here. Only same-origin URLs are allowed —
+          // otherwise this endpoint would be an SSRF hole.
+          const url = typeof body.url === 'string' ? body.url.trim() : ''
+          if (url === '') return fail('bad-request', '缺少 url')
+          try {
+            const binary = await session.fetchBinary(url)
+            return { ok: true, value: { dataUrl: `data:${binary.contentType};base64,${binary.base64}`, via: binary.strategy } }
+          } catch (error) {
+            return fail('image-failed', (error as Error).message)
+          }
+        }
+
         case 'listProjects': {
           return { ok: true, value: await workbench.projects() }
         }

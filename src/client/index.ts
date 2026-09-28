@@ -84,12 +84,18 @@ interface ClientContext {
  * Open a fresh conversation in the current workspace and send `text` verbatim.
  * Mirrors dsh-zentao's flow so the "处理" button behaves the way it does there.
  */
-function buildHandlePrompt(ctx: ClientContext) {
+function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspaces?: WorkspacesFace }, ctx: ClientContext) {
   return async (text: string): Promise<void> => {
-    const sessions = ctx.get?.('sessions') as SessionsFace | undefined
-    const workspaces = ctx.get?.('workspaces') as WorkspacesFace | undefined
+    // Reading them as *properties* is what the reference plugin does, and it is
+    // the only shape cordis guarantees for a visible service: `ctx.get(name)` is
+    // strict and THROWS for anything not visible to this fiber — which is why the
+    // three 处理 buttons silently did nothing before.
+    const captured = getServices()
+    const direct = ctx as unknown as { sessions?: SessionsFace, workspaces?: WorkspacesFace }
+    const sessions = captured.sessions ?? direct.sessions
+    const workspaces = captured.workspaces ?? direct.workspaces
     if (sessions === undefined || workspaces === undefined) {
-      throw new Error('会话服务不可用（sessions/workspaces 未加载）：请改用「复制引用」把这条单据贴进对话')
+      throw new Error('会话服务未就绪（sessions/workspaces 不可见）：请刷新页面重试；或用「复制引用」把这条单据贴进对话')
     }
     const workspaceSnapshot = workspaces.list.getSnapshot()
     const current = sessions.list.getSnapshot().current
@@ -129,7 +135,29 @@ async function callHost(endpoint: string, payload?: unknown): Promise<ZentaoCall
 }
 
 export function apply(ctx: ClientContext): void {
-  const base = { call: callHost, handlePrompt: buildHandlePrompt(ctx) }
+  /**
+   * Services for the 处理/一键修复 buttons, captured when they become visible.
+   *
+   * Soft on purpose: the panel must still mount in a host without a session
+   * controller (then the buttons explain themselves instead of the whole panel
+   * failing to load).
+   */
+  let sessionServices: { sessions?: SessionsFace, workspaces?: WorkspacesFace } = {}
+  if (ctx.inject !== undefined) {
+    ctx.inject(['sessions', 'workspaces'], (scoped) => {
+      const asProps = scoped as unknown as { sessions?: SessionsFace, workspaces?: WorkspacesFace }
+      sessionServices = {
+        ...(asProps.sessions === undefined ? {} : { sessions: asProps.sessions }),
+        ...(asProps.workspaces === undefined ? {} : { workspaces: asProps.workspaces }),
+      }
+      return () => { sessionServices = {} }
+    })
+  }
+
+  const base = {
+    call: callHost,
+    handlePrompt: buildHandlePrompt(() => sessionServices, ctx),
+  }
 
   /**
    * Open the workbench in the native right sidebar.

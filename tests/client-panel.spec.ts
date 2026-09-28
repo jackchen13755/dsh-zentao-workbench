@@ -153,23 +153,22 @@ function mount(
     get: () => undefined,
     effect: () => undefined,
   }
-  // The panel's "处理"/"批量引用" go through the real `buildHandlePrompt`, which
-  // opens a conversation via sessions/workspaces. Stub those services by their
-  // actual shape so the whole path is exercised and the sent text is captured.
+  // The panel's "处理"/"一键修复"/"批量引用" go through the real
+  // `buildHandlePrompt`, which opens a conversation via sessions/workspaces.
+  // Those arrive the way the shell delivers them — `inject([...], ctx)` with the
+  // services readable as *properties* (ctx.get is strict and throws).
+  const sessions = {
+    list: { getSnapshot: () => ({ current: 's1' }) },
+    open: () => undefined,
+    scope: () => ({ get: () => ({ send: async (text: string) => { await handlePrompt(text) } }) }),
+  }
+  const workspaces = {
+    list: { getSnapshot: () => ({ items: [{ workspaceId: 'w1', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }) },
+    connectWorkspace: async () => 's2',
+  }
   const ctxWithServices = {
     ...ctx,
-    get: (name: string) => (name === 'sessions'
-      ? {
-          list: { getSnapshot: () => ({ current: 's1' }) },
-          open: () => undefined,
-          scope: () => ({ get: () => ({ send: async (text: string) => { await handlePrompt(text) } }) }),
-        }
-      : name === 'workspaces'
-        ? {
-            list: { getSnapshot: () => ({ items: [{ workspaceId: 'w1', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }) },
-            connectWorkspace: async () => 's2',
-          }
-        : undefined),
+    inject: (deps: string[], callback: (context: unknown) => unknown) => callback({ sessions, workspaces }),
   }
   ;(module.apply as (context: unknown) => void)(ctxWithServices)
   if (component === undefined) throw new Error('panel did not register')

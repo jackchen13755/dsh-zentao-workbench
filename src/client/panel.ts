@@ -225,6 +225,14 @@ const PANEL_CSS = `
 .zt-chip-warn { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #92400e; }
 .zt-hist { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l1, #eceff3); color: var(--dsw-alias-label-secondary, #888); font-size: 11px; line-height: 1.6; }
 .zt-desc { font-size: 12px; line-height: 1.65; border: 1px solid var(--dsw-alias-border-l1, #eceff3); border-radius: 10px; padding: 10px 12px; overflow-x: auto; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); }
+.zt-search { display: flex; align-items: center; gap: 6px; margin: 10px 12px 0; padding: 0 8px; height: 30px; border-radius: 9px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); transition: border-color .12s ease, box-shadow .12s ease; }
+.zt-search:hover { border-color: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 18%, transparent); }
+.zt-search:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px color-mix(in srgb, #2563eb 16%, transparent); }
+.zt-search-icon { opacity: .45; font-size: 14px; line-height: 1; }
+.zt-search input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent; color: inherit; font-size: 12px; }
+.zt-search input::placeholder { color: var(--dsw-alias-label-secondary, #999); }
+.zt-search-clear { border: none; background: transparent; color: inherit; opacity: .5; cursor: pointer; font-size: 11px; line-height: 1; padding: 4px 5px; border-radius: 6px; }
+.zt-search-clear:hover { opacity: 1; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 10%, transparent); }
 .zt-empty { padding: 28px 16px; text-align: center; color: var(--dsw-alias-label-secondary, #888); font-size: 12px; line-height: 1.8; }
 .zt-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
 `
@@ -782,20 +790,31 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
     }
 
-    if (tab === 'bugs') body.push(createElement('div', { key: 'search', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '10px 12px 0' } },
+    if (tab === 'bugs') body.push(createElement('div', { key: 'search', className: 'zt-search' },
+      createElement('span', { className: 'zt-search-icon', 'aria-hidden': 'true' }, '⌕'),
       createElement('input', {
         'data-zentao-search': '1',
         // Local filter over the page already fetched: the list endpoint rejects
         // server-side keyword params (measured: keywords=/title= → 0 rows).
         placeholder: '搜索 单号 / 标题 / 类型 / 级别 / 指派给…',
-        className: 'zt-field',
         value: search,
         onChange: (event: { target: { value: string } }) => setSearch(event.target.value),
-        style: { flex: 1, minWidth: 0 },
+        // Esc is the reflex for "get me out of this filter" — it clears, not blurs.
+        onKeyDown: (event: { key?: string }) => { if (event.key === 'Escape') setSearch('') },
       }),
+      // The hit count belongs next to what produced it, not in the toolbar below.
       search.trim() === ''
         ? null
-        : createElement('button', { type: 'button', onClick: () => setSearch(''), style: { cursor: 'pointer' } }, '清空')))
+        : createElement('span', { className: 'zt-chip', title: '命中 / 本页总数' }, `${visibleBugs.length}/${bugs.length}`),
+      search.trim() === ''
+        ? null
+        : createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'clear-search',
+            className: 'zt-search-clear',
+            title: '清空搜索（Esc）',
+            onClick: () => setSearch(''),
+          }, '✕')))
 
     if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
       createElement('select', {
@@ -845,7 +864,6 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('span', { style: { fontSize: 11, color: TOKEN.dim } },
         [
           scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
-          search.trim() === '' ? '' : `命中 ${visibleBugs.length}/${bugs.length}`,
           bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
         ].filter((part) => part !== '').join(' · ')),
       createElement('label', { style: { display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, color: TOKEN.dim } },

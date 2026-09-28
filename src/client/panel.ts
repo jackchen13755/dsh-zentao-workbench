@@ -9,7 +9,7 @@
  *    on its own is what made the old flow waste turns.
  */
 import { createElement, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { severityTone } from '../severity.js'
+import { severityTone, priTone, type SeverityTone} from '../severity.js'
 
 import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 
@@ -111,25 +111,32 @@ const FAB_TEXT = '禅道'
  * the label — see `severityTone`. The label itself stays visible, because a
  * colour alone is not a name.
  */
+function toneBadge(text: string, tone: SeverityTone, attrs: Record<string, string>, hint: string): ReactNode {
+  const label = text.trim()
+  if (label === '') return null
+  return createElement('span', {
+    ...attrs,
+    className: 'zt-pill',
+    title: hint,
+    style: { background: tone.bg, color: tone.fg },
+  }, label)
+}
+
+/** Severity badge, coloured by the numeric level the list markup carries. */
 function severityBadge(label: string, level: number | null | undefined): ReactNode {
   const text = label.trim()
   if (text === '') return null
   const tone = severityTone(level, text)
-  return createElement('span', {
-    'data-zentao-severity': String(level ?? ''),
-    title: `级别 ${text}（${tone.rank}）`,
-    style: {
-      background: tone.bg,
-      color: tone.fg,
-      borderRadius: 4,
-      padding: '0 5px',
-      fontSize: 11,
-      fontWeight: 600,
-      lineHeight: '16px',
-      display: 'inline-block',
-      verticalAlign: 'middle',
-    },
-  }, text)
+  return toneBadge(text, tone, { 'data-zentao-severity': String(level ?? '') }, `级别 ${text}（${tone.rank}）`)
+}
+
+/** Priority badge — same mechanism, its own palette, so P and 级别 never blur. */
+function priBadge(pri: string): ReactNode {
+  const text = String(pri ?? '').trim()
+  if (text === '') return null
+  const tone = priTone(text)
+  const label = /^[Pp]/.test(text) ? text.toUpperCase() : `P${text}`
+  return toneBadge(label, tone, { 'data-zentao-pri': text }, `优先级 ${label}（${tone.rank}）`)
 }
 
 /**
@@ -146,6 +153,65 @@ const DISCIPLINE = [
   '2. 改单只用 zentao_resolve_bug：**先 dryRun:true 预览**，确认无误再去掉 dryRun 提交；不要手写 POST；',
   '3. 提交前把 detail_reason 与 changeImpact 换成**真实**内容 —— 插件会自动兜底，但兜底文案会留在单子里。',
 ].join('\n')
+
+/**
+ * The panel's stylesheet.
+ *
+ * Inline styles cannot express `:hover`, a sticky header or a pill radius, and
+ * the panel is injected into someone else's DOM — so it ships one scoped sheet
+ * (every selector is namespaced under `.zt-`) instead of a build-time CSS file.
+ * Colours use the shell's theme variables with plain fallbacks, so it reads
+ * correctly on the light and the dark theme.
+ */
+/**
+ * Render a resolve-form value.
+ *
+ * ZenTao's `detail_reason` default is an HTML template
+ * (`<p><strong>[产生原因及改进]</strong>(开发填写)</p>…`), so plain-text rendering
+ * showed the user raw tags. Values that look like markup are sanitised and
+ * rendered as markup; everything else stays text.
+ */
+function richValue(value: unknown): ReactNode {
+  const text = String(value ?? '')
+  if (text === '') return '(空)'
+  if (!/<\s*[a-z][\s\S]*?>/i.test(text)) return text.length > 200 ? `${text.slice(0, 200)}…` : text
+  return createElement('div', {
+    'data-zentao-rich-value': '1',
+    dangerouslySetInnerHTML: { __html: clientSanitize(text) },
+    style: { flex: 1, wordBreak: 'break-word', lineHeight: 1.55 },
+  }, null)
+}
+
+/** Mirror of the host's sanitiser: no scripts, handlers or javascript: URLs. */
+function clientSanitize(html: string): string {
+  return html
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    .replace(/(href|src)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
+}
+
+const PANEL_CSS = `
+.zt-row { display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); cursor: grab; transition: background .12s ease; }
+.zt-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 5%, transparent); }
+.zt-row:active { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 9%, transparent); }
+.zt-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--dsw-alias-label-secondary, #888); }
+.zt-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.zt-ok { color: #15803d; }
+.zt-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 17px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .2px; }
+.zt-head { display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 3; backdrop-filter: blur(8px); }
+.zt-btn { height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: transparent; color: inherit; font-size: 12px; cursor: pointer; transition: background .12s ease, border-color .12s ease; }
+.zt-btn:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 6%, transparent); }
+.zt-btn-primary { border-color: #2563eb; color: #2563eb; font-weight: 600; }
+.zt-btn-primary:hover { background: color-mix(in srgb, #2563eb 10%, transparent); }
+.zt-field { height: 26px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, #e3e6ea); background: transparent; color: inherit; font-size: 12px; padding: 0 8px; }
+.zt-field:focus { outline: 2px solid color-mix(in srgb, #2563eb 40%, transparent); outline-offset: 1px; }
+.zt-sec { padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
+.zt-label { font-size: 11px; color: var(--dsw-alias-label-secondary, #888); margin-bottom: 4px; }
+.zt-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.zt-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
+`
 
 const ROLE_PRESETS: Array<{ key: string, label: string, prompt: (reference: string) => string }> = [
   { key: 'fix', label: '一键修复', prompt: (ref) => `${ref}\n\n请直接修复这个 Bug：先复现并定位根因（信息不足就明确说缺什么，别猜），给出最小改动修复并自测（能跑测试就跑）。\n\n${DISCIPLINE}` },
@@ -562,18 +628,22 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
-  // NOT auto-hidden any more. Hiding it requires knowing the sidebar entry is
-  // actually visible, and that has not been confirmable — every attempt to hide
-  // it "because registration succeeded" left the user with nothing to click.
-  // The user can hide it themselves with the button in the panel footer.
+  // The sidebar entry now really works (guide registered → the tab is there), so
+  // the floating surface steps aside: one entry, not two. It still exists for a
+  // host without a sidebar service, where the tab doubles as open/close.
+  if (!inline && deps.hasSidebar?.() === true) return null
   if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true
-  const header = createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
-    createElement('strong', { style: { flex: 1 } }, '禅道工作台'),
-    createElement('span', { style: { fontSize: 11, color: authenticated ? TOKEN.ok : TOKEN.danger } },
-      authenticated ? `已连接 · ${config?.strategy ?? ''}` : '未连接'),
-    createElement('button', { type: 'button', onClick: () => setOpen(false), style: { background: 'none', border: 'none', color: TOKEN.dim, cursor: 'pointer' } }, '✕'))
+  /**
+   * The panel has no header: the title was noise (the sidebar tab already says
+   * 「禅道」), the close button duplicated the tab's own close control, and the
+   * connection state now lives in the footer with the rest of the meta.
+   *
+   * The stylesheet element lives here instead of in a header wrapper — it must
+   * stay in the tree, and dropping the header would otherwise take it with it.
+   */
+  const panelStyle = createElement('style', { 'data-zentao-style': '1', dangerouslySetInnerHTML: { __html: PANEL_CSS } }, null)
 
   const body: ReactNode[] = []
   if (error !== '') body.push(createElement('div', { key: 'err', style: { padding: '8px 12px', color: TOKEN.danger, fontSize: 12 } }, error))
@@ -702,12 +772,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
     }
 
-    if (tab === 'bugs') body.push(createElement('div', { key: 'search', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px 0' } },
+    if (tab === 'bugs') body.push(createElement('div', { key: 'search', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '10px 12px 0' } },
       createElement('input', {
         'data-zentao-search': '1',
         // Local filter over the page already fetched: the list endpoint rejects
         // server-side keyword params (measured: keywords=/title= → 0 rows).
         placeholder: '搜索 单号 / 标题 / 类型 / 级别 / 指派给…',
+        className: 'zt-field',
         value: search,
         onChange: (event: { target: { value: string } }) => setSearch(event.target.value),
         style: { flex: 1, minWidth: 0 },
@@ -808,6 +879,57 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       // left most of the drawer empty).
       // `selected` is narrowed here too: the submit handler below reads its id,
       // and this section is only ever rendered inside the detail overlay.
+      // Actions first: the card is opened to act on the bug, so they sit at the
+      // top of the body instead of below the description and history.
+      const detailActions = selected === null ? null : createElement('div', { 'data-zentao-detail-actions': '1',
+        style: { position: 'sticky', top: 0, zIndex: 2, padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}`,
+                 background: TOKEN.bg } },
+        createElement('div', { className: 'zt-actions' },
+          createElement('button', { type: 'button', draggable: true, className: 'zt-btn', style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
+          createElement('button', { type: 'button', className: 'zt-btn', onClick: () => void insert(referenceOf(selected.bug), '引用') }, '复制引用'),
+          createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'plan',
+            title: '第 1 步：按表单默认值生成解决计划（只读，不会提交）',
+            onClick: () => void previewPlan(selected.bug.id),
+            className: 'zt-btn zt-btn-primary',
+          }, busy === 'plan' ? '生成中…' : '① 预览解决计划'),
+          // 「一键修复」 is the one people press most, so it leads and is styled as
+          // the primary action of the card.
+          createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'one-click-fix',
+            title: '新建会话并把这条 Bug 连同「复现→定位→最小修复→自测→先 dryRun 再提交」的提示词一次发出',
+            className: 'zt-btn zt-btn-primary',
+            onClick: async () => {
+              const preset = ROLE_PRESETS.find((role) => role.key === 'fix')!
+              try {
+                await deps.handlePrompt(preset.prompt(referenceOf(selected.bug)))
+                setFlash('已新建会话并发出修复请求')
+              } catch (problem) {
+                setError((problem as Error).message)
+              }
+            },
+          }, '🚀 一键修复'),
+        
+          ...ROLE_PRESETS.filter((role) => role.key !== 'fix').map((role) => createElement('button', {
+            key: role.key,
+            type: 'button',
+            // Each one opens a NEW conversation in the current workspace and sends
+            // the bug reference plus that role's preset prompt — nothing is written
+            // to ZenTao.
+            title: `新建一个会话，把这条 Bug 的引用 + 「${role.label}」视角的预设提示词发过去（只开对话，不改单）`,
+            className: 'zt-btn',
+            onClick: async () => {
+              try {
+                await deps.handlePrompt(role.prompt(referenceOf(selected.bug)))
+                setFlash(`已按「${role.label}」起会话`)
+              } catch (problem) {
+                setError((problem as Error).message)
+              }
+            },
+          }, `处理·${role.label}`))),)
+
       const planSection = plan === null || selected === null ? null : createElement('div', {
         key: 'plan',
         style: { borderTop: `1px solid ${TOKEN.line}`, marginTop: 12, paddingTop: 10 },
@@ -815,7 +937,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           createElement('div', { style: { fontWeight: 600, marginBottom: 4 } }, plan.blocked ? '解决计划（被拦，不能提交）' : '解决计划（预览，未提交）'),
           ...plan.fields.map(([name, value]) => createElement('div', { key: name, style: { fontSize: 12, display: 'flex', gap: 6 } },
             createElement('span', { style: { color: TOKEN.dim, minWidth: 108 } }, name),
-            createElement('span', { style: { flex: 1, wordBreak: 'break-all' } }, value === '' ? '(空)' : String(value).slice(0, 160)))),
+            richValue(value))),
           ...Object.entries(plan.autoFilled).map(([name, why]) => createElement('div', { key: `af-${name}`, style: { fontSize: 11, color: TOKEN.dim, marginTop: 2 } }, `↳ ${name}：${why}`)),
           ...plan.problems.map((problem) => createElement('div', { key: problem, style: { fontSize: 12, color: TOKEN.danger, marginTop: 2 } }, `✘ ${problem}`)),
           createElement('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
@@ -860,6 +982,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('div', { style: { padding: '10px 12px' } },
         createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
           severityBadge(selected.bug.severity || '', selected.bug.severityLevel),
+          priBadge((selected.bug as { pri?: string }).pri ?? ''),
           createElement('span', null, `产品 ${selected.bug.productLabel || selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`)),
         (selected.bug.story ?? '') === ''
           ? createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2 } }, '相关需求：无（列表页没有需求列，只有详情页有）')
@@ -873,6 +996,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 rel: 'noreferrer',
                 style: { color: TOKEN.accent },
               }, selected.bug.story ?? '')),
+        detailActions,
         createElement('div', { style: { fontSize: 12 } },
           `必填：${selected.resolve.fields.filter((field) => field.required).map((field) => field.label).join('、')}`),
         createElement('div', { style: { fontSize: 12, color: TOKEN.dim, marginTop: 2 } },
@@ -901,51 +1025,6 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : []),
         createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } },
           '要解决这条 Bug：点「① 预览解决计划」看清将要提交的字段，再点「② 确认并提交解决」（会二次确认）。'),
-        createElement('div', { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
-          createElement('button', { type: 'button', draggable: true, style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
-          createElement('button', { type: 'button', onClick: () => void insert(referenceOf(selected.bug), '引用'), style: { cursor: 'pointer' } }, '复制引用'),
-          createElement('button', {
-            type: 'button',
-            'data-zentao-action': 'plan',
-            title: '第 1 步：按表单默认值生成解决计划（只读，不会提交）',
-            onClick: () => void previewPlan(selected.bug.id),
-            style: { cursor: 'pointer', fontWeight: 600, borderColor: TOKEN.accent, color: TOKEN.accent },
-          }, busy === 'plan' ? '生成中…' : '① 预览解决计划'),
-          // 「一键修复」 is the one people press most, so it leads and is styled as
-          // the primary action of the card.
-          createElement('button', {
-            type: 'button',
-            'data-zentao-action': 'one-click-fix',
-            title: '新建会话并把这条 Bug 连同「复现→定位→最小修复→自测→先 dryRun 再提交」的提示词一次发出',
-            style: { cursor: 'pointer', fontWeight: 600 },
-            onClick: async () => {
-              const preset = ROLE_PRESETS.find((role) => role.key === 'fix')!
-              try {
-                await deps.handlePrompt(preset.prompt(referenceOf(selected.bug)))
-                setFlash('已新建会话并发出修复请求')
-              } catch (problem) {
-                setError((problem as Error).message)
-              }
-            },
-          }, '🚀 一键修复'),
-
-          ...ROLE_PRESETS.filter((role) => role.key !== 'fix').map((role) => createElement('button', {
-            key: role.key,
-            type: 'button',
-            // Each one opens a NEW conversation in the current workspace and sends
-            // the bug reference plus that role's preset prompt — nothing is written
-            // to ZenTao.
-            title: `新建一个会话，把这条 Bug 的引用 + 「${role.label}」视角的预设提示词发过去（只开对话，不改单）`,
-            style: { cursor: 'pointer' },
-            onClick: async () => {
-              try {
-                await deps.handlePrompt(role.prompt(referenceOf(selected.bug)))
-                setFlash(`已按「${role.label}」起会话`)
-              } catch (problem) {
-                setError((problem as Error).message)
-              }
-            },
-          }, `处理·${role.label}`))),
       planSection))
 
       body.push(createElement('div', { key: 'content', style: { position: 'relative', flex: 1, minHeight: 0 } },
@@ -966,9 +1045,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           }))
         },
         onClick: () => void openDetail(bug.id),
-        style: { padding: '7px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' },
+        className: 'zt-row',
       },
-      createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'baseline' } },
+      createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
         createElement('input', {
           type: 'checkbox',
           'data-zentao-check': bug.id,
@@ -979,11 +1058,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           onChange: () => toggleChecked(bug.id),
           style: { cursor: 'pointer', margin: 0 },
         }),
-        createElement('span', { style: { color: TOKEN.dim, fontSize: 11 } }, `#${bug.id}`),
-        createElement('span', { style: { flex: 1 } }, bug.title)),
-      createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
         severityBadge(bug.severity || '', bug.severityLevel),
-        createElement('span', null, `P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`))))),
+        priBadge(bug.pri),
+        createElement('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bug.title)),
+      createElement('div', { className: 'zt-meta' },
+        createElement('span', { className: 'zt-id' }, `#${bug.id}`),
+        createElement('span', null, bug.type || '未分类'),
+        createElement('span', null, `指派 ${bug.assignedTo || '未指派'}`),
+        bug.resolution === '' ? null : createElement('span', { className: 'zt-ok' }, `已解决 · ${bug.resolution}`))))),
         detailOverlay))
     }
   }
@@ -992,7 +1074,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   // The footer always states the instance and the last refresh time; transient
   // messages go to the corner toast instead of replacing this line.
   const sidebarReg = deps.sidebarStatus?.()
-  const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' } },
+  const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', rowGap: 4 } },
+    createElement('span', {
+      'data-zentao-conn': '1',
+      title: '禅道连接状态与所用登录策略',
+      style: { display: 'inline-flex', alignItems: 'center', gap: 4 },
+    },
+      createElement('span', { style: { width: 6, height: 6, borderRadius: 999, background: authenticated ? TOKEN.ok : TOKEN.danger } }, null),
+      authenticated ? `已连接 · ${config?.strategy ?? ''}` : '未连接'),
     createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
     (() => {
       // Rendered, not merely logged: this single line says how far the native
@@ -1004,10 +1093,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       const base = status.registered
         ? `侧边栏：已注册${status.opened ? '并已打开页签' : '（未打开）'}`
         : '侧边栏：未注册（sidebarRightTabs 未出现）'
-      const text = status.error === undefined ? base : `${base}；${status.error}`
+      // Short in the bar, full text in the tooltip: the verbose version wrapped
+      // the footer into a column of single characters.
+      const text = status.registered ? base : '侧边栏：未注册'
+      const full = status.error === undefined ? base : `${base}；${status.error}`
       return createElement('span', {
         'data-zentao-sidebar-status': '1',
-        title: '这一行说明侧边栏注册走到哪一步；如果侧边栏里看不到「禅道」，把这一行发给开发者',
+        title: full,
         style: { fontSize: 11, color: status.registered ? TOKEN.dim : '#b45309' },
       }, text)
     })(),
@@ -1019,6 +1111,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           'data-zentao-action': 'open-in-sidebar',
           // Escape hatch that does not depend on finding the guide capsule: the
           // sidebar's own navigation controller opens our page directly.
+          className: 'zt-btn',
           title: '在右侧边栏里打开禅道工作台（不经过指南胶囊）',
           onClick: () => {
             if (deps.openInSidebar?.() === true) setFlash('已在侧边栏打开')
@@ -1032,6 +1125,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       // The desktop app has NO Reload menu item and no Cmd+R binding (verified by
       // enumerating its menus with System Events), so a page could only be
       // refreshed by closing and reopening it. This is that missing affordance.
+      className: 'zt-btn',
       title: '重新加载界面（等价于刷新页面；只重载浏览器半边，不动宿主进程）',
       onClick: () => {
         if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') window.location.reload()
@@ -1086,7 +1180,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       fontFamily: 'system-ui,-apple-system,"PingFang SC",sans-serif',
       fontSize: 13,
     },
-  }, header, createElement('div', {
+  }, panelStyle, createElement('div', {
     // A flex column rather than one big scroll area: the list has to own the
     // remaining height (`minHeight: 0` is what lets a flex child shrink enough
     // to scroll), while the unauthenticated view scrolls on its own.

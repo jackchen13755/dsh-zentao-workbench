@@ -124,7 +124,10 @@
       case 'resolvePlan':
         return { ok: true, value: { plan: {
           bugID: '55036', status: '激活',
-          fields: [['resolution', 'fixed'], ['reason', 'codeBug'], ['bugInchargedBy', 'Dev One'], ['assignedTo', 'Yanping.Wang'], ['changeImpact', '本次改动影响范围：Service360（自动填充）']],
+          fields: [['resolution', 'fixed'], ['reason', 'codeBug'], ['bugInchargedBy', 'Dev One'], ['assignedTo', 'Yanping.Wang'],
+            // ZenTao's detail_reason default really is an HTML template — the panel
+            // must render it as markup instead of showing the tags (user report).
+            ['detail_reason', '<p><strong>[产生原因及改进]</strong>(开发填写)</p><br /><br /><p><strong>[漏测原因及改进]</strong>(QA填写)</p><br />']],
           problems: [], autoFilled: { changeImpact: '服务端必填但表单为空，已自动填充最小可接受内容' },
           notes: [], blocked: false,
         } } }

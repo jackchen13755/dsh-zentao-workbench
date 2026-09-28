@@ -271,7 +271,10 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     // The panel had to load its data after opening.
     expect(calls).toContain('listBugs')
     const text = textOf(tree).join(' ')
-    expect(text).toContain('禅道工作台')
+    // No header any more: the title went away and the connection state moved to
+    // the footer with the rest of the meta.
+    expect(text).not.toContain('禅道工作台')
+    expect(text).toContain('已连接')
     expect(text).toContain('刷新')
     expect(text).toContain('55036')
     expect(text).toContain('55035')
@@ -495,12 +498,11 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     }
     const withSidebar = mount(rpc, undefined, { sidebar: true })
     let tree = await withSidebar.settle()
-    // The entry stays: hiding it required knowing the sidebar entry is visible,
-    // which has never been confirmable here.
-    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeDefined()
-    // Open it to read the status line (the footer only exists while open).
-    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
-    tree = await withSidebar.settle()
+    // Sidebar hosts it → no floating entry (fixed: the guide entry is real now).
+    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeUndefined()
+    // Read the status line through the sidebar variant (the footer lives in the body).
+    const inline = mount(rpc, undefined, { sidebar: true, variant: 'sidebar' })
+    tree = await inline.settle()
     const status = find(tree, (element) => element.props['data-zentao-sidebar-status'] === '1')
     expect(status).toBeDefined()
     expect(textOf(status).join(' ')).toContain('已注册')

@@ -45,3 +45,24 @@ export function severityTone(level: number | null | undefined, label = ''): Seve
   if (/次要|建议|轻微|minor|trivial|suggestion/.test(text)) return TONES[4]!
   return NEUTRAL_TONE
 }
+
+/**
+ * Priority (P) tones.
+ *
+ * ZenTao's priority is 1..4 with 1 the most urgent; the list markup renders it
+ * as bare text (`P3`), so the badge is driven by the digit. Kept separate from
+ * the severity palette on purpose: a 主要/3 bug can still be P1, and one glance
+ * should tell the two apart (severity = amber/red family, priority = its own).
+ */
+const PRI_TONES: Record<string, SeverityTone> = {
+  '1': { bg: '#dc2626', fg: '#ffffff', rank: 'P1 · 最高' },
+  '2': { bg: '#f97316', fg: '#ffffff', rank: 'P2 · 高' },
+  '3': { bg: '#0ea5e9', fg: '#ffffff', rank: 'P3 · 中' },
+  '4': { bg: '#64748b', fg: '#ffffff', rank: 'P4 · 低' },
+}
+
+/** Tone for a priority cell, which may read `3`, `P3` or be empty. */
+export function priTone(pri: string): SeverityTone {
+  const digit = /([1-4])/.exec(String(pri ?? ''))?.[1]
+  return digit === undefined ? NEUTRAL_TONE : (PRI_TONES[digit] ?? NEUTRAL_TONE)
+}

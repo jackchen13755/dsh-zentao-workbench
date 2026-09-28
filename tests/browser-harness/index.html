@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>zentao 面板 · 浏览器 harness</title>
+<style>
+  /* The panel is position:fixed, so the page only needs a backdrop. */
+  html, body { margin: 0; height: 100%; background: #0f1012; color: #d0d0d0;
+    font: 13px system-ui, -apple-system, "PingFang SC", sans-serif; }
+  #hint { padding: 14px 16px; color: #8a8a8a; line-height: 1.7; }
+  #hint code { color: #d8d8d8; }
+</style>
+</head>
+<body>
+<div id="hint">
+  <div>这是 <b>dsh-zentao-workbench</b> 浏览器半边的离线 harness：</div>
+  <div>· 用同款模块加载契约（<code>window.__ModuleLoader__.load({id,factory})</code>）挂载真实的 <code>lib/client.js</code></div>
+  <div>· React 18 UMD 真渲染，宿主侧 <code>/zentao</code> RPC 用假数据顶替</div>
+  <div>· 页面载入后自动展开面板，于是不用重启 DSH 也能看到它长什么样</div>
+  <div id="status">（等待 bundle 挂载…）</div>
+</div>
+<div id="root"></div>
+
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script>
+  // ---- stub host: capture the module definition, then mount -----------------
+  window.__CALLS__ = []
+  window.__HARNESS__ = { ready: false, error: null }
+
+  let definition
+  window.__ModuleLoader__ = {
+    load: (value) => { definition = value },
+  }
+
+  const BUGS = [
+    { id: '55036', title: '查询条件location浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55036' },
+    { id: '55035', title: '查询条件category浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55035' },
+    { id: '55004', title: '使用profile字段搜索时未清空右侧location信息', severity: '次要', pri: '2', type: '代码错误', assignedTo: 'dev.one', resolution: 'fixed', href: '/index.php?m=bug&f=view&bugID=55004' },
+  ]
+
+  const rpc = {
+    call: async (_channel, endpoint, payload) => {
+      window.__CALLS__.push({ endpoint, payload: payload ?? null })
+      switch (endpoint) {
+        case 'getConfig':
+        case 'sessionStatus':
+          return { ok: true, value: {
+            server: 'https://zentao.example.com', authenticated: true, strategy: 'bridge',
+            probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（以实测为准）' }],
+            config: { server: 'https://zentao.example.com', authenticated: true, probes: [] },
+          } }
+        case 'listBugs':
+          return { ok: true, value: { bugs: BUGS, total: BUGS.length, via: 'bridge', url: 'https://zentao.example.com/index.php?m=my&f=bug', fetchedAt: new Date().toISOString(), cached: false } }
+        case 'listTasks':
+          return { ok: true, value: { tasks: [], total: 0, empty: true, via: 'bridge', url: '', fetchedAt: new Date().toISOString(),
+            note: '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败' } }
+        case 'bugContext':
+          return { ok: true, value: {
+            bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', status: '激活', assignedTo: 'Dev One', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
+            resolve: {
+              uid: 'kuid-harness',
+              fields: [
+                { name: 'resolution', label: '解决方案', required: true },
+                { name: 'reason', label: 'Bug产生原因', required: true },
+                { name: 'bugInchargedBy', label: 'Bug所属人', required: true },
+                { name: 'changeImpact', label: '代码变更影响范围', required: true },
+                { name: 'detail_reason', label: 'bug详细原因', limit: 512 },
+              ],
+              defaults: { resolution: 'fixed', reason: 'codeBug', bugInchargedBy: '', assignedTo: 'Yanping.Wang', resolvedBuild: '', resolvedDate: '2026-09-28 17:05:00', changeImpact: '' },
+              resolutionOptions: [{ value: 'fixed', text: '已解决' }],
+              reasonOptions: [{ value: 'codeBug', text: '代码错误' }],
+              buildMatches: [],
+              optionCounts: { resolvedBuild: 254, bugInchargedBy: 892, assignedTo: 892 },
+            },
+            histories: ['2026-08-18 16:27:16, 由 Reporter One 创建。'],
+            cachedAt: new Date().toISOString(), cached: false,
+          } }
+        case 'resolvePlan':
+          return { ok: true, value: { plan: {
+            bugID: '55036', status: '激活',
+            fields: [
+              ['resolution', 'fixed'], ['reason', 'codeBug'], ['bugInchargedBy', 'Dev One'],
+              ['assignedTo', 'Yanping.Wang'], ['changeImpact', '本次改动影响范围：Service360（自动填充）'],
+            ],
+            problems: [], autoFilled: { changeImpact: '服务端必填但表单为空，已自动填充最小可接受内容' },
+            notes: [], blocked: false,
+          } } }
+        default:
+          return { ok: false, error: { code: 'stub', message: 'harness 未提供该 endpoint：' + endpoint } }
+      }
+    },
+  }
+
+  const ctx = {
+    slots: {
+      inject: (_name, callback) => callback(),
+      register: (_options, component) => { window.__PANEL__ = component; return () => undefined },
+    },
+    connection: { rpc },
+    // No sessions/workspaces in the harness: the "处理" button then reports the
+    // graceful message the real panel gives when those services are absent.
+    get: () => undefined,
+    effect: () => undefined,
+  }
+</script>
+
+<script src="vendor/client.js"></script>
+
+<script>
+  const status = document.getElementById('status')
+  try {
+    if (definition === undefined) throw new Error('bundle 没有调用 window.__ModuleLoader__.load')
+    const module = definition.factory((name) => {
+      if (name === 'react') return window.React
+      throw new Error('bundle 请求了未预期的包：' + name)
+    })
+    window.__HARNESS__.module = module
+    module.apply(ctx)
+    if (window.__PANEL__ === undefined) throw new Error('apply() 没有注册面板组件')
+
+    window.ReactDOM.createRoot(document.getElementById('root')).render(
+      window.React.createElement(window.__PANEL__, {}),
+    )
+    window.__HARNESS__.ready = true
+    status.textContent = 'bundle 已挂载（id=' + definition.id + '，inject=' + JSON.stringify(module.inject) + '）'
+
+    // Auto-open the panel so a screenshot shows the real thing, then open the
+    // first bug's detail so the card and the plan preview are exercised too.
+    window.__HARNESS__.openPanel = async () => {
+      const button = document.querySelector('button[title^="禅道工作台"]')
+      if (button === null) throw new Error('找不到悬浮入口按钮')
+      button.click()
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const row = document.querySelector('div[draggable="true"]')
+      if (row !== null) {
+        row.click()
+        await new Promise((resolve) => setTimeout(resolve, 80))
+        const planButton = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.includes('预览解决计划'))
+        if (planButton !== undefined) {
+          planButton.click()
+          await new Promise((resolve) => setTimeout(resolve, 80))
+        }
+      }
+    }
+    setTimeout(() => { window.__HARNESS__.openPanel().catch((error) => { window.__HARNESS__.error = String(error) }) }, 120)
+  } catch (error) {
+    window.__HARNESS__.error = String(error && error.message ? error.message : error)
+    status.textContent = '挂载失败：' + window.__HARNESS__.error
+  }
+</script>
+</body>
+</html>

@@ -115,6 +115,21 @@ node scripts/probe-write-path.mjs 55036        # 需要会话（ZENTAO_* 环境�
 回读状态与提交前一致 → **单据未被改动**，退出码 0。
 这条同时独立证实了本插件要修的那个 retry 根源：服务端在缺 `changeImpact` 时确实会拒绝。
 
+## 浏览器 harness（不重启也能看面板）
+
+面板正常只在 DSH 外壳里渲染，而新接线的插件要重启宿主才会被加载。`tests/browser-harness/`
+用**同款模块加载契约**（`window.__ModuleLoader__.load({id,factory})`）挂载真实的
+`lib/client.js`，配合 React 18 UMD 与一个假 `/zentao` RPC，于是可以在真浏览器里驱动它：
+
+```sh
+bash tests/browser-harness/prepare.sh          # 取 React/ReactDOM UMD + 拷入当前 bundle
+# 然后用任意静态服务器打开 tests/browser-harness/index.html
+```
+
+用它实测到并修掉了三个真缺陷：入口被展开的面板压住（点不动）、切到任务页签时
+Bug 列表与详情卡仍在渲染、以及缺少 `#root` 容器（这条是 harness 自身的问题，
+但说明真 React 能抓到桩渲染器抓不到的错误）。
+
 ## 本机注意
 
 DSH 自带的 node（`~/.dsh/dsh-runtimes/*/dependencies/node`）带签名且开启 library validation，
@@ -142,8 +157,9 @@ host+client typecheck clean，并在真实实例上核对：我的 Bug 列表（
 （1792 字节 vs 原始表单 255592 字节）、真实单据 dryRun（`blocked=false`）、
 登录链路（错误凭据得到服务端原文判词）。
 
-尚未验证：面板在浏览器里的实机渲染（需重启 DSH）、以及一次**真实提交**（需指定一个
-可解决的 bug）。
+面板已在**真浏览器 + 真 React 18** 里验证过（见下面的离线 harness）：加载、渲染、
+页签互斥、刷新（时间戳变化）、任务页签的空态、console 无报错。尚未验证的是它
+**装在真实 DSH 外壳里**的 slots 集成与真实 RPC（需重启 DSH），以及一次**真实提交**。
 
 **任务列表的诚实边界**：路由 `m=project&f=task`、过滤器与空态标记「暂时没有任务」都是
 实测的；但本实例**没有任何任务行**（8 个项目逐个探过，全为空），所以 `parseTaskList` 的

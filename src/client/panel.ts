@@ -281,6 +281,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
 
   const entry = createElement('button', {
     type: 'button',
+    // Stable hooks for automated UI checks (the browser harness and any future
+    // end-to-end test drive the panel through these, not through CSS shapes).
+    'data-zentao-entry': '1',
     title: '禅道工作台（可拖动）',
     onPointerDown,
     onClick: () => {
@@ -294,7 +297,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       top: pos.y,
       width: 40,
       height: 40,
-      zIndex: 9998,
+      // Above the panel (9999): an open panel used to overlap the entry and
+      // swallow its clicks, so the entry could not be used to collapse it.
+      zIndex: 10000,
       cursor: 'grab',
       display: 'flex',
       alignItems: 'center',
@@ -381,6 +386,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       ...(['bugs', 'tasks'] as const).map((value) => createElement('button', {
         key: value,
         type: 'button',
+        'data-zentao-tab': value,
         onClick: () => setTab(value),
         style: {
           cursor: 'pointer',
@@ -415,14 +421,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('option', { value: '0' }, '不自动')),
       createElement('button', {
         type: 'button',
+        'data-zentao-action': 'refresh',
         title: '刷新状态、列表、打开的详情与已生成的计划',
         onClick: () => void refreshAll(true),
         style: { cursor: 'pointer' },
       }, busy === 'all' || busy === 'bugs' ? '刷新中…' : '刷新')))
 
-    body.push(createElement('div', { key: 'list', style: { maxHeight: 260, overflow: 'auto' } },
+    // Only the active tab renders: the list and the detail card used to stay
+    // mounted under the task tab (found in the browser harness).
+    if (tab === 'bugs') body.push(createElement('div', { key: 'list', style: { maxHeight: 260, overflow: 'auto' } },
       ...bugs.map((bug) => createElement('div', {
         key: bug.id,
+        'data-zentao-bug': bug.id,
         draggable: true,
         onDragStart: (event: { dataTransfer?: { setData(type: string, value: string): void } }) => {
           event.dataTransfer?.setData('text/plain', referenceOf({
@@ -439,7 +449,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('span', { style: { flex: 1 } }, bug.title)),
       createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2 } }, `${bug.severity || '-'} / P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`)))))
 
-    if (selected !== null) {
+    if (tab === 'bugs' && selected !== null) {
       body.push(createElement('div', { key: 'detail', style: { borderTop: `1px solid ${TOKEN.line}`, padding: '10px 12px', maxHeight: 300, overflow: 'auto' } },
         createElement('div', { style: { fontWeight: 600 } }, `${selected.bug.id}｜${selected.bug.title}`),
         createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0' } },
@@ -454,7 +464,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('div', { style: { display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' } },
           createElement('button', { type: 'button', draggable: true, style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
           createElement('button', { type: 'button', onClick: () => void insert(referenceOf(selected.bug), '引用'), style: { cursor: 'pointer' } }, '复制引用'),
-          createElement('button', { type: 'button', onClick: () => void previewPlan(selected.bug.id), style: { cursor: 'pointer' } }, busy === 'plan' ? '生成中…' : '预览解决计划'),
+          createElement('button', { type: 'button', 'data-zentao-action': 'plan', onClick: () => void previewPlan(selected.bug.id), style: { cursor: 'pointer' } }, busy === 'plan' ? '生成中…' : '预览解决计划'),
           ...ROLE_PRESETS.map((role) => createElement('button', {
             key: role.key,
             type: 'button',
@@ -508,14 +518,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const footer = flash === ''
     ? createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8 } },
         createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
-        createElement('span', null, stamp))
+        createElement('span', { 'data-zentao-stamp': '1' }, stamp))
     : createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.ok, fontSize: 11 } }, flash)
 
   const panel = createElement('div', {
     style: {
       ...box,
       position: 'fixed',
-      left: Math.max(8, Math.min(window.innerWidth - 372, pos.x - 332)),
+      left: Math.max(8, Math.min(window.innerWidth - 372, pos.x - 332 - 12)),
       top: Math.max(8, Math.min(window.innerHeight - 440, pos.y - 20)),
       width: 364,
       maxHeight: '80vh',

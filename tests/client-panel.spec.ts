@@ -47,7 +47,10 @@ const flush = async (rounds = 6): Promise<void> => {
   for (let index = 0; index < rounds; index++) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>) {
+function mount(
+  rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>,
+  handlePrompt: (text: string) => Promise<void> = async () => undefined,
+) {
   // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
   // stub replaces global fetch instead of injecting an rpc service.
   ;(globalThis as { fetch?: unknown }).fetch = async (_url: unknown, init?: { body?: string }) => {
@@ -150,7 +153,25 @@ function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true,
     get: () => undefined,
     effect: () => undefined,
   }
-  ;(module.apply as (context: unknown) => void)(ctx)
+  // The panel's "处理"/"批量引用" go through the real `buildHandlePrompt`, which
+  // opens a conversation via sessions/workspaces. Stub those services by their
+  // actual shape so the whole path is exercised and the sent text is captured.
+  const ctxWithServices = {
+    ...ctx,
+    get: (name: string) => (name === 'sessions'
+      ? {
+          list: { getSnapshot: () => ({ current: 's1' }) },
+          open: () => undefined,
+          scope: () => ({ get: () => ({ send: async (text: string) => { await handlePrompt(text) } }) }),
+        }
+      : name === 'workspaces'
+        ? {
+            list: { getSnapshot: () => ({ items: [{ workspaceId: 'w1', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }) },
+            connectWorkspace: async () => 's2',
+          }
+        : undefined),
+  }
+  ;(module.apply as (context: unknown) => void)(ctxWithServices)
   if (component === undefined) throw new Error('panel did not register')
 
   const render = (): Element => {
@@ -374,6 +395,70 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(scopeSelect.props.onChange as (event: unknown) => void)({ target: { value: 'project' } })
     await settle()
     expect(scopeCalls).toContain('project')
+  })
+
+  it('batches the ticked bugs through plan → submit, and quotes them into one conversation', async () => {
+    const calls: string[] = []
+    const prompts: string[] = []
+    const rpc = async (endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown }> => {
+      calls.push(endpoint)
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [
+          { id: '11', title: '第一条', severity: '主要', severityLevel: 3, pri: '3', type: 'x', assignedTo: 'dev', resolution: '', href: '/index.php?m=bug&f=view&bugID=11' },
+          { id: '22', title: '第二条', severity: '次要', severityLevel: 4, pri: '2', type: 'x', assignedTo: 'dev', resolution: '', href: '/index.php?m=bug&f=view&bugID=22' },
+        ], total: 2, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      if (endpoint === 'resolvePlan') {
+        return { ok: true, value: { plan: { bugID: 'x', status: '激活', fields: [], problems: [], autoFilled: {}, notes: [], blocked: false } } }
+      }
+      if (endpoint === 'resolveSubmit') {
+        // The batch must still ask for an explicit confirmation per call.
+        expect((payload as { confirm?: boolean }).confirm).toBe(true)
+        return { ok: true, value: { outcome: { ok: true, status: '已解决' } } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+    const { settle } = mount(rpc, async (text: string) => { prompts.push(text) })
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    // No bar until something is ticked.
+    expect(find(tree, (element) => element.props['data-zentao-batch'] === '1')).toBeUndefined()
+
+    const tick = (id: string): void => {
+      const box = find(tree, (element) => element.props['data-zentao-check'] === id)!
+      ;(box.props.onChange as () => void)()
+    }
+    tick('11')
+    tree = await settle()
+    tick('22')
+    tree = await settle()
+    expect(textOf(tree).join(' ')).toContain('已选 2 条')
+
+    // 批量预览 → one plan per ticked bug.
+    const preview = find(tree, (element) => element.props['data-zentao-action'] === 'batch-preview')!
+    ;(preview.props.onClick as () => void)()
+    await settle()
+    expect(calls.filter((endpoint) => endpoint === 'resolvePlan')).toHaveLength(2)
+
+    // 批量引用到会话 → one prompt quoting both.
+    const quote = find(tree, (element) => element.props['data-zentao-action'] === 'batch-quote')!
+    ;(quote.props.onClick as () => void)()
+    await settle()
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('#11')
+    expect(prompts[0]).toContain('#22')
+    expect(prompts[0]).toContain('共 2 条')
+
+    // 批量解决 → one submit per ticked bug (each carrying confirm:true).
+    const resolve = find(tree, (element) => element.props['data-zentao-action'] === 'batch-resolve')!
+    ;(resolve.props.onClick as () => void)()
+    await settle()
+    expect(calls.filter((endpoint) => endpoint === 'resolveSubmit')).toHaveLength(2)
   })
 
   it('opens a detail card when a row is clicked', async () => {

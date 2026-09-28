@@ -174,6 +174,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   /** Local keyword filter over the fetched page (id/title/type/severity/assignee/方案). */
   const [search, setSearch] = useState('')
   const [scope, setScope] = useState<'mine' | 'project'>('mine')
+  /** Bug ids ticked for a batch action (survives paging/filter changes). */
+  const [checked, setChecked] = useState<string[]>([])
+  /** Progress of a running batch, e.g. `2/5 提交中`. */
+  const [batchProgress, setBatchProgress] = useState('')
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [projectID, setProjectID] = useState('')
   const [intervalMin, setIntervalMin] = useState(5)
@@ -318,6 +322,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   }, [flash])
 
   /** Keyword filter over the fetched page — instant, no server round trip. */
+  const toggleChecked = useCallback((bugID: string) => {
+    setChecked((previous) => previous.includes(bugID) ? previous.filter((id) => id !== bugID) : [...previous, bugID])
+  }, [])
+
   const visibleBugs = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (query === '') return bugs
@@ -353,6 +361,84 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       setBusy('')
     }
   }, [call])
+
+  /**
+   * Batch actions work on the ticked ids.
+   *
+   * Deliberately *not* a new host endpoint: each bug goes through the same
+   * `resolvePlan` / `resolveSubmit` pair the single-bug flow uses, so the batch
+   * inherits the dryRun-first discipline and the per-bug verdicts stay visible
+   * (a batch that reports only "done" would hide exactly the failures this
+   * plugin exists to prevent).
+   */
+  const batchPreview = useCallback(async () => {
+    if (checked.length === 0) return
+    setBatchProgress(`预览 0/${checked.length}`)
+    const blocked: string[] = []
+    const ready: string[] = []
+    try {
+      for (const [index, bugID] of checked.entries()) {
+        setBatchProgress(`预览 ${index + 1}/${checked.length}`)
+        const value = await call('resolvePlan', { bugID }) as { plan: Plan }
+        if (value.plan.blocked || value.plan.problems.length > 0) blocked.push(`#${bugID}`)
+        else ready.push(`#${bugID}`)
+      }
+      setFlash(`可提交 ${ready.length} 条${ready.length > 0 ? `（${ready.join(' ')}）` : ''}${blocked.length > 0 ? `；被拦 ${blocked.length} 条（${blocked.join(' ')}）` : ''}`)
+    } catch (problem) {
+      setError((problem as Error).message)
+    } finally {
+      setBatchProgress('')
+    }
+  }, [call, checked])
+
+  const batchResolve = useCallback(async () => {
+    if (checked.length === 0) return
+    // Writing asks first — and says exactly which bugs it will touch.
+    if (!window.confirm(`确认在禅道把 ${checked.length} 条标记为已解决？\n${checked.map((id) => `#${id}`).join(' ')}\n此操作会写入真实系统。`)) return
+    setBusy('batch')
+    const ok: string[] = []
+    const failed: string[] = []
+    try {
+      for (const [index, bugID] of checked.entries()) {
+        setBatchProgress(`提交 ${index + 1}/${checked.length}`)
+        try {
+          const value = await call('resolveSubmit', { bugID, confirm: true }) as { outcome: { ok: boolean, status: string, serverError?: string } }
+          if (value.outcome.ok) ok.push(`#${bugID}`)
+          else failed.push(`#${bugID}（${value.outcome.serverError ?? value.outcome.status}）`)
+        } catch (problem) {
+          failed.push(`#${bugID}（${(problem as Error).message}）`)
+        }
+      }
+      setFlash(`批量解决：成功 ${ok.length} 条${ok.length > 0 ? `（${ok.join(' ')}）` : ''}${failed.length > 0 ? `；失败 ${failed.length} 条：${failed.join('；')}` : ''}`)
+      setChecked([])
+      setPlan(null)
+      await refreshAll(true)
+    } finally {
+      setBatchProgress('')
+      setBusy('')
+    }
+  }, [call, checked, refreshAll])
+
+  const batchQuote = useCallback(async () => {
+    const picked = bugs.filter((bug) => checked.includes(bug.id))
+    if (picked.length === 0) return
+    const text = [
+      `要批量处理的禅道单（共 ${picked.length} 条）：`,
+      ...picked.map((bug) => referenceOf({
+        ...bug,
+        status: bug.resolution === '' ? '未解决' : '已解决',
+        url: absoluteUrl(config?.server ?? '', bug.href),
+      })),
+      '',
+      '请逐个给出处理建议；需要改单时先用 zentao_bug_context 读最新详情，再走 zentao_resolve_bug（先 dryRun）。',
+    ].join('\n')
+    try {
+      await deps.handlePrompt(text)
+      setFlash(`已把 ${picked.length} 条引用发到新会话`)
+    } catch (problem) {
+      setError((problem as Error).message)
+    }
+  }, [bugs, checked, config?.server, deps])
 
   const insert = useCallback(async (text: string, label: string) => {
     try {
@@ -597,7 +683,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           search.trim() === '' ? '' : `命中 ${visibleBugs.length}/${bugs.length}`,
           bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
         ].filter((part) => part !== '').join(' · ')),
-      createElement('button', {
+      createElement('label', { style: { display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, color: TOKEN.dim } },
+        createElement('input', {
+          type: 'checkbox',
+          'data-zentao-check-all': '1',
+          checked: visibleBugs.length > 0 && visibleBugs.every((bug) => checked.includes(bug.id)),
+          onChange: () => {
+            const ids = visibleBugs.map((bug) => bug.id)
+            const allIn = ids.every((id) => checked.includes(id))
+            setChecked(allIn ? checked.filter((id) => !ids.includes(id)) : [...new Set([...checked, ...ids])])
+          },
+          style: { cursor: 'pointer', margin: 0 },
+        }), '全选'),      createElement('button', {
         type: 'button',
         'data-zentao-action': 'refresh',
         title: '刷新状态、列表、打开的详情与已生成的计划',
@@ -607,6 +704,20 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
 
     // Only the active tab renders: the list and the detail card used to stay
     // mounted under the task tab (found in the browser harness).
+    if (tab === 'bugs' && checked.length > 0) {
+      body.push(createElement('div', {
+        key: 'batch',
+        'data-zentao-batch': '1',
+        style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 12px', borderBottom: `1px solid ${TOKEN.line}`, background: 'rgba(37,99,235,.06)' },
+      },
+      createElement('span', { style: { fontSize: 12, fontWeight: 600 } }, `已选 ${checked.length} 条`),
+      createElement('button', { type: 'button', 'data-zentao-action': 'batch-preview', title: '对每条跑一次解决计划（只读，不提交），汇总哪些可提交、哪些被拦', onClick: () => void batchPreview(), style: { cursor: 'pointer' } }, '批量预览'),
+      createElement('button', { type: 'button', 'data-zentao-action': 'batch-resolve', title: '逐条提交解决（会二次确认并列出单号；每条都回读状态确认）', onClick: () => void batchResolve(), style: { cursor: 'pointer', fontWeight: 600, borderColor: TOKEN.accent, color: TOKEN.accent } }, '批量解决…'),
+      createElement('button', { type: 'button', 'data-zentao-action': 'batch-quote', title: '新建一个会话，把这 N 条的引用一起发过去（不写禅道）', onClick: () => void batchQuote(), style: { cursor: 'pointer' } }, '批量引用到会话'),
+      createElement('button', { type: 'button', onClick: () => setChecked([]), style: { cursor: 'pointer' } }, '清空选择'),
+      batchProgress === '' ? null : createElement('span', { style: { fontSize: 11, color: TOKEN.dim } }, batchProgress)))
+    }
+
     if (tab === 'bugs') {
       // The list owns every remaining pixel; the detail is an overlay laid on top
       // of it (it used to be a 260px list with the card squeezed underneath, which
@@ -737,6 +848,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: { padding: '7px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' },
       },
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'baseline' } },
+        createElement('input', {
+          type: 'checkbox',
+          'data-zentao-check': bug.id,
+          title: '勾选以批量处理',
+          checked: checked.includes(bug.id),
+          // The row itself opens the detail; ticking must not do that too.
+          onClick: (event: { stopPropagation?: () => void }) => event.stopPropagation?.(),
+          onChange: () => toggleChecked(bug.id),
+          style: { cursor: 'pointer', margin: 0 },
+        }),
         createElement('span', { style: { color: TOKEN.dim, fontSize: 11 } }, `#${bug.id}`),
         createElement('span', { style: { flex: 1 } }, bug.title)),
       createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },

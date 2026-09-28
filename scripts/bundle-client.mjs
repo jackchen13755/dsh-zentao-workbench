@@ -103,6 +103,12 @@ const body = [
 ].join('\n')
 
 mkdirSync('lib', { recursive: true })
-writeFileSync(OUT_FILE, body)
+// Bake the build time into the bundle.
+//
+// Written for a real problem: three rounds of client fixes appeared to "not work"
+// because the page was still running an older bundle — and nothing on screen said
+// which one. The panel footer prints this stamp, so staleness is visible.
+const stamp = new Date().toISOString().replace('T', ' ').slice(0, 16)
+writeFileSync(OUT_FILE, body.replaceAll('__BUILD_STAMP__', JSON.stringify(stamp)))
 rmSync(BUILD_DIR, { recursive: true, force: true })
 process.stdout.write(`bundle-client: wrote ${OUT_FILE} (${modules.length} modules, ${body.length} bytes)\n`)

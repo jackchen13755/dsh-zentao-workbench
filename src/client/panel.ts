@@ -13,6 +13,9 @@ import { severityTone, priTone, type SeverityTone} from '../severity.js'
 
 import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 
+/** Injected by scripts/bundle-client.mjs at build time. */
+declare const __BUILD_STAMP__: string
+
 export interface PanelDeps {
   /**
    * Where the panel is rendered:
@@ -1232,6 +1235,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       }, text)
     })(),
     createElement('span', { 'data-zentao-stamp': '1' }, stamp),
+    createElement('span', {
+      'data-zentao-build': '1',
+      title: '客户端构建时间：刷新后若这一行没变，说明页面还在跑旧代码',
+      style: { opacity: .7 },
+    }, `构建 ${typeof __BUILD_STAMP__ === 'string' ? __BUILD_STAMP__.slice(5) : '?'}`),
     sidebarReg === undefined || !sidebarReg.registered
       ? null
       : createElement('button', {

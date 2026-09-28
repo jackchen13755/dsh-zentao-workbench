@@ -101,6 +101,27 @@ CLI 管理的 profile 用 `dsh plugin --profile web add <dir>`；`desktop` profi
 顺带实测到一次真实的降级：默认 jar（9/23 导出、`zentaosid` 会话级）已失效时，
 会话不会报"未登录"了事，而是标记该策略失效并落到下一条 —— 这正是设计要的行为。
 
+## 面板报 405 / 数据不显示时：先跑 `zentao doctor`
+
+```sh
+node bin/zentao.mjs doctor [--host-url http://127.0.0.1:19387]
+```
+
+它 POST 一次 `<host>/zentao/sessionStatus`，用状态码判定通道路由是否真的注册：
+**401/403 = 已注册**（只是要求浏览器鉴权，属正常）；**404/405 = 没注册**。
+405 来自 `dsh-host-frontend-static` 的兜底处理器（非 GET/HEAD 一律 405），
+即请求落到了静态资源兜底、没能命中插件通道。
+
+实测过的两种组合：
+- 会话正常（`已登录 · 走浏览器插件桥`）+ 405 → 只有面板传输坏了，见下；
+- 两者都不通 → 先解决会话（`zentao status`）。
+
+**405 的根因（已修，2026-09-28）**：插件入口用 `ctx.get('connection')` 读服务，而 cordis 的
+`Context.get(name, strict = true)` 在服务不可见时**抛异常**，于是 effect 在**注册完工具之后**
+中断 → 工具照常能用、通道永远没注册。改为官方写法 `ctx.inject(['connection'], cb)`
+（依赖就绪再跑，且工具不依赖 connection，headless/TUI 仍可用）。这类 bug 的教训：
+**"工具能用"不等于"插件整体加载成功"**。
+
 ## 写路径怎么验证（不改动任何单据）
 
 所有写路径默认只跑 `dryRun`。要证明真实 POST 也能工作，用这个探针 —— 它走生产代码

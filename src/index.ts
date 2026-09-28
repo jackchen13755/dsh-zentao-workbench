@@ -21,8 +21,22 @@ interface MinimalContext {
   effect(fn: () => Disposer): void
   tools: { register(tool: unknown): () => void }
   logger?: { info?: (message: string) => void, warn?: (message: string) => void }
-  /** Read a service without declaring it as a hard dependency. */
+  /**
+   * cordis: start a child plugin once the named services exist.
+   *
+   * Do NOT read a service with `ctx.get(name)` here: cordis's Context.get takes
+   * `strict = true` and **throws** when the service is not visible, which
+   * aborted this plugin's effect mid-way and left the RPC channel unregistered
+   * (symptom measured in the shell: tools worked, while `POST /zentao/…` hit the
+   * static fallback and answered HTTP 405).
+   */
+  inject?(inject: string[], callback: (context: MinimalContext & { connection?: ConnectionService }) => Disposer): unknown
+  /** Only for the last-resort fallback when `inject` is unavailable. */
   get?(name: string): unknown
+}
+
+interface ConnectionService {
+  rpc?: ConnectionRpcFace
 }
 
 export const name = 'dsh-zentao-workbench'
@@ -93,11 +107,15 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
       ctx.logger?.info?.(`[dsh-zentao-workbench] registered tool: ${(tool as { name?: string }).name ?? '?'}`)
     }
 
-    // The panel needs a transport; a TUI/headless profile simply has none, and
-    // the tools above stay useful there — hence the opportunistic lookup
-    // instead of a hard `inject` on the connection service.
-    const connection = ctx.get?.('connection') as { rpc?: ConnectionRpcFace } | undefined
-    if (connection?.rpc !== undefined) {
+    // The panel needs a transport. Register it as a child plugin that starts
+    // when `connection` exists, rather than requiring it: the tools above stay
+    // useful in a TUI/headless profile that has no connection service at all.
+    const registerPanelTransport = (scoped: MinimalContext & { connection?: ConnectionService }): Disposer => {
+      const connection = scoped.connection
+      if (connection?.rpc === undefined) {
+        scoped.logger?.warn?.('[dsh-zentao-workbench] connection service exposes no rpc — panel transport unavailable, tools only')
+        return
+      }
       const handler = createZentaoRpcHandler({
         session,
         workbench,
@@ -105,12 +123,22 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
         exportJarPath: pluginConfig?.cookieJarPath,
       })
       const dispose = connection.rpc.handle(ZENTAO_RPC_CHANNEL, (endpoint, payload, signal) => handler(endpoint, payload, signal))
-      disposers.push(() => {
+      scoped.effect(() => () => {
         void Promise.resolve(dispose()).catch(() => undefined)
       })
-      ctx.logger?.info?.(`[dsh-zentao-workbench] rpc channel ${ZENTAO_RPC_CHANNEL} registered (panel transport)`)
+      scoped.logger?.info?.(`[dsh-zentao-workbench] rpc channel ${ZENTAO_RPC_CHANNEL} registered (panel transport)`)
+    }
+
+    if (ctx.inject !== undefined) {
+      ctx.inject(['connection'], registerPanelTransport)
     } else {
-      ctx.logger?.info?.('[dsh-zentao-workbench] no connection service — panel transport unavailable, tools only')
+      // Last resort for a host whose Context lacks `inject`: never let a failed
+      // lookup take the tools down with it.
+      try {
+        registerPanelTransport(ctx as MinimalContext & { connection?: ConnectionService })
+      } catch (error) {
+        ctx.logger?.warn?.(`[dsh-zentao-workbench] panel transport not registered: ${(error as Error).message}`)
+      }
     }
 
     ctx.logger?.info?.('[dsh-zentao-workbench] loaded (browser-bridge-first session; resolve plans before it posts)')

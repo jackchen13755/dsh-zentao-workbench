@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { ZENTAO_RPC_CHANNEL } from './rpc.js'
 import { renderPlan } from './resolve.js'
 import { renderStatus, ZenTaoAuthError, ZenTaoSession } from './session.js'
 import { resolveBug, ZentaoWorkbench } from './zentao.js'
@@ -19,7 +20,7 @@ import { resolveBug, ZentaoWorkbench } from './zentao.js'
 const VALUE_FLAGS = new Set([
   'server', 'limit', 'only', 'build', 'history', 'resolution', 'reason',
   'detail', 'impact', 'comment', 'assigned-to', 'in-charged-by', 'cookie-jar', 'bridge-url',
-  'account', 'save-jar', 'project',
+  'account', 'save-jar', 'project', 'host-url',
 ])
 const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help', 'password-stdin'])
 
@@ -28,6 +29,8 @@ const USAGE = `用法：
   zentao bugs     [--limit 30] [--only all|open|resolved] [--refresh] [--json]
   zentao tasks    [--project <id>] [--limit 30] [--json]
   zentao context  <bugID> [--build X] [--history 5] [--refresh] [--json]
+  zentao doctor   [--host-url http://127.0.0.1:19387]
+                                   （判定面板通道路由是否真的注册；面板报 405 时先跑它）
   zentao login    --account A          （密码读 ZENTAO_PASSWORD，或 --password-stdin）
                   [--save-jar <path>]  （可选：把会话写成 0600 jar 供其它工具复用）
   zentao resolve  <bugID> [--resolution R] [--reason R] [--detail T|@file]
@@ -157,6 +160,34 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         }
         if (result.bugs.length === 0) io.out('  （没有匹配的单据）\n')
         return 0
+      }
+
+      case 'doctor': {
+        const hostUrl = (flag(parsed, 'host-url') ?? 'http://127.0.0.1:19387').replace(/\/+$/, '')
+        const route = `${hostUrl}${ZENTAO_RPC_CHANNEL}/sessionStatus`
+        io.out(`面板通道自检\n  探测 ${route}\n`)
+        let verdict: string
+        try {
+          const response = await fetch(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type: 'client-request', rpcId: 'doctor', method: 'sessionStatus', payload: {} }),
+            signal: AbortSignal.timeout(8000),
+          })
+          if (response.status === 401 || response.status === 403) {
+            verdict = `HTTP ${response.status} —— 通道路由已注册（401/403 是浏览器鉴权要求，属正常）✓`
+          } else if (response.status === 404 || response.status === 405) {
+            verdict = `HTTP ${response.status} —— **通道路由没有注册**：宿主里这个插件的 connection 注册没成功（或宿主未重启加载新代码）。`
+          } else {
+            verdict = `HTTP ${response.status} —— 非预期状态码，请人工看一眼响应体。`
+          }
+        } catch (error) {
+          verdict = `连不上宿主（${(error as Error).message}）—— 确认 DSH 在运行，或用 --host-url 指对端口。`
+        }
+        io.out(`  ${verdict}\n\n`)
+        const status = await session.status(true)
+        io.out(`${renderStatus(status)}\n`)
+        return verdict.includes('✓') ? 0 : 1
       }
 
       case 'login': {

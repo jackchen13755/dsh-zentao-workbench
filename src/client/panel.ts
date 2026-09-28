@@ -15,6 +15,14 @@ import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 
 export interface PanelDeps {
   /**
+   * Where the panel is rendered:
+   *  · `floating` (default) — the right-edge tab plus a fixed drawer;
+   *  · `sidebar` — inline inside the native right sidebar tab (no tab, no drawer).
+   */
+  variant?: 'floating' | 'sidebar'
+  /** Open the native sidebar tab; returns false when this host has no sidebar. */
+  openInSidebar?: () => boolean
+  /**
    * One panel call. Implemented by the browser half as a POST to
    * {@link ZENTAO_FETCH_PATH} — the transport this Host actually mounts.
    */
@@ -165,6 +173,8 @@ function referenceOf(bug: { id: string, title: string, status?: string, pri?: st
 }
 
 export function ZentaoPanel(deps: PanelDeps): ReactNode {
+  /** Sidebar variant renders its body immediately; the floating one starts collapsed. */
+  const inline = deps.variant === 'sidebar'
   const [open, setOpen] = useState(false)
   const [config, setConfig] = useState<Config | null>(null)
   const [bugs, setBugs] = useState<BugRow[]>([])
@@ -301,13 +311,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   // without this the list kept showing the previous order — caught by the
   // sort behaviour test.
   useEffect(() => {
-    if (!open || config?.authenticated !== true) return undefined
+    if (!(open || inline) || config?.authenticated !== true) return undefined
     void refreshBugs(true)
     return undefined
   }, [open, config?.authenticated, only, orderBy, scope, projectID, refreshBugs])
 
   useEffect(() => {
-    if (!open || config?.authenticated !== true) return undefined
+    if (!(open || inline) || config?.authenticated !== true) return undefined
     if (lastUpdated === null) void refreshAll(false)
     if (tab === 'tasks' && tasks.length === 0 && taskNote === '') void refreshTasks()
     if (intervalMin <= 0) return undefined
@@ -456,7 +466,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     type: 'button',
     'data-zentao-entry': '1',
     title: '禅道工作台',
-    onClick: () => setOpen((value) => !value),
+    onClick: () => {
+      // The tab doubles as the sidebar entry: clicking it opens the workbench in
+      // the native right sidebar when this host has one, and only falls back to
+      // the floating drawer otherwise.
+      if (deps.openInSidebar?.() === true) return
+      setOpen((value) => !value)
+    },
     style: {
       position: 'fixed',
       // `50vh`, not `50%`: a percentage resolves against the containing block,
@@ -482,7 +498,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
-  if (!open) return entry
+  if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true
   const header = createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
@@ -877,7 +893,26 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   // Right-edge drawer, mirroring the reference plugin's `panel`.
   const panel = createElement('div', {
     'data-zentao-panel': '1',
-    style: {
+    // Inside the sidebar the seat already provides position and size; a fixed
+    // 384px drawer there would fight the host layout.
+    style: inline
+      ? {
+          display: 'flex',
+          flexDirection: 'column',
+          // `flex: 1 1 auto` for a flex seat, `height: 100%` for a definite-height
+          // one: a percentage alone collapses to the content height when the
+          // seat's own box is indefinite (measured in the harness seat).
+          flex: '1 1 auto',
+          height: '100%',
+          minHeight: 0,
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          background: TOKEN.bg,
+          color: TOKEN.text,
+          fontFamily: 'system-ui,-apple-system,"PingFang SC",sans-serif',
+          fontSize: 13,
+        }
+      : {
       position: 'fixed',
       top: 0,
       right: 0,
@@ -912,11 +947,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   // The drawer covers the right edge, so the tab is not rendered while it is
   // open (the reference plugin leaves its fab underneath and relies on the ✕;
   // hiding it removes the overlap instead of depending on z-order).
-  const fab = open ? null : entry
+  const fab = open || inline ? null : entry
 
   // Transient messages live in their own corner toast (never in the layout flow).
-  if (flash === '') return createElement('div', null, fab, panel)
-  const toast = createElement('div', {
+  const toast = flash === '' ? null : createElement('div', {
     'data-zentao-toast': '1',
     style: {
       position: 'fixed',
@@ -932,6 +966,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       maxWidth: 360,
     },
   }, flash)
+
+  // The sidebar seat measures *this* element, so the inline variant must not add
+  // a wrapper: an extra div without a height collapsed the pane to its content
+  // (measured: 197px inside an 820px pane).
+  if (inline) {
+    return toast === null
+      ? panel
+      : createElement('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } }, panel, toast)
+  }
+  if (toast === null) return createElement('div', null, fab, panel)
   return createElement('div', null, fab, panel, toast)
 }
 

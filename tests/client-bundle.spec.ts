@@ -95,6 +95,77 @@ describe('browser bundle', () => {
     expect(registered[0]!.options).toMatchObject({ name: 'shell.overlay', id: 'zentao-workbench' })
   })
 
+  it('registers a native sidebar tab, its pane body, and points the floating tab at it', () => {
+    const { module } = loadBundle()
+    const registered: Array<{ options: Record<string, unknown>, component: (props: unknown) => unknown }> = []
+    const injectedSlots: string[] = []
+    const injectedServices: string[][] = []
+    const tabTypes: Array<{ id: string, kind: string, title: () => string }> = []
+    let openedTab: unknown = null
+
+    const ctx = {
+      slots: {
+        inject: (name: string, callback: () => void) => { injectedSlots.push(name); callback() },
+        register: (options: Record<string, unknown>, component: (props: unknown) => unknown) => {
+          registered.push({ options, component })
+          return () => undefined
+        },
+      },
+      // The seat registrations go through `ctx.inject(['sidebarRightTabs'], …)`.
+      inject: (deps: string[], callback: (context: unknown) => unknown) => {
+        injectedServices.push(deps)
+        return callback({ get: (name: string) => (name === 'sidebarRightTabs'
+          ? { register: (definition: { id: string, kind: string, title: () => string }) => { tabTypes.push(definition); return () => undefined } }
+          : undefined) })
+      },
+      get: (name: string) => (name === 'betterSidebar' ? { openTab: (tab: unknown) => { openedTab = tab } } : undefined),
+      effect: (callback: () => unknown) => callback(),
+    }
+    ;(module.apply as (context: unknown) => void)(ctx)
+
+    // The tab type is what puts 「禅道」 into the sidebar; the kind must be ours.
+    expect(injectedServices).toContainEqual(['sidebarRightTabs'])
+    expect(tabTypes).toHaveLength(1)
+    expect(tabTypes[0]!.id).toBe('dsh-zentao-workbench:panel')
+    expect(tabTypes[0]!.kind).toBe('dsh-zentao-workbench:zentao')
+    expect(tabTypes[0]!.title()).toBe('禅道')
+
+    // …and the pane body is registered under that same key, in the inline variant.
+    expect(injectedSlots).toContain('sidebar.right.pane.tab')
+    const body = registered.find((entry) => entry.options.key === 'dsh-zentao-workbench:panel')
+    expect(body).toBeDefined()
+    const outer = body!.component({}) as { props: Record<string, unknown> }
+    expect(outer.props.variant).toBe('sidebar')
+
+    // The floating tab opens the sidebar tab rather than its own drawer.
+    const overlay = registered.find((entry) => entry.options.id === 'zentao-workbench')
+    expect(overlay).toBeDefined()
+    const floating = overlay!.component({}) as { props: Record<string, unknown> }
+    expect(typeof floating.props.openInSidebar).toBe('function')
+    expect((floating.props.openInSidebar as () => boolean)()).toBe(true)
+    expect(openedTab).toEqual({ type: 'dsh-zentao-workbench:panel' })
+  })
+
+  it('falls back to the drawer when the host has no sidebar', () => {
+    const { module } = loadBundle()
+    let overlayComponent: ((props: unknown) => unknown) | undefined
+    const ctx = {
+      slots: {
+        inject: (_name: string, callback: () => void) => callback(),
+        register: (options: Record<string, unknown>, component: (props: unknown) => unknown) => {
+          if (options.id === 'zentao-workbench') overlayComponent = component
+          return () => undefined
+        },
+      },
+      // Strict `get` throws for an absent service, as cordis does.
+      get: (name: string) => { throw new Error(`service "${name}" is not available`) },
+      effect: (callback: () => unknown) => callback(),
+    }
+    ;(module.apply as (context: unknown) => void)(ctx)
+    const floating = overlayComponent!({}) as { props: Record<string, unknown> }
+    expect((floating.props.openInSidebar as () => boolean)()).toBe(false)
+  })
+
   it('carries no placeholder host or unfinished marker into the shipped bundle', () => {
     // Regression: the drag reference was once built as
     // `https://example.invalid${href}`, so a quoted bug carried a dead link.

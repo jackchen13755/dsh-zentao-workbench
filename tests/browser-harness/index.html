@@ -15,6 +15,10 @@
      the transformed ancestor establishes the containing block but has NO
      definite height, so `height: 100%` resolves to auto (content height). */
   #auto { position: absolute; left: 0; top: 0; right: 0; transform: translateZ(0); }
+  /* ?variant=sidebar 复现右侧栏座位：固定 384px 宽、满高，由座位给尺寸 */
+  #side { position: absolute; top: 0; right: 0; width: 384px; height: 100%; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+  /* 真实侧栏的面板容器是满高的；这里照做，否则百分比高度无从解析 */
+  #sideRoot { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   #clip { position: absolute; left: 240px; top: 160px; width: 520px; height: 360px;
     border: 1px dashed #4b5563; border-radius: 8px;
     transform: translateZ(0); overflow: hidden; background: rgba(255,255,255,.02); }
@@ -32,6 +36,7 @@
 <div id="root"></div>
 <div id="clip" style="display:none"><div id="clipRoot"></div></div>
 <div id="auto" style="display:none"><div id="autoRoot"></div></div>
+<div id="side" style="display:none"><div id="sideRoot"></div></div>
 
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
@@ -61,9 +66,13 @@
   const LAYOUT = params.get('layout') ?? 'plain'
   const CLIPPED = LAYOUT === 'clipped'
   const AUTOHEIGHT = LAYOUT === 'autoheight'
-  if (LAYOUT !== 'plain') document.getElementById('root').style.display = 'none'
+  const SIDEBAR = params.get('variant') === 'sidebar'
+  if (LAYOUT !== 'plain' || SIDEBAR) document.getElementById('root').style.display = 'none'
   if (CLIPPED) document.getElementById('clip').style.display = 'block'
   if (AUTOHEIGHT) document.getElementById('auto').style.display = 'block'
+  // `flex`, not `block`: an inline display would override the stylesheet and the
+  // seat would then size to its content instead of the pane height.
+  if (SIDEBAR) document.getElementById('side').style.display = 'flex'
   const UNAUTH_PROBES = [
     { id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（该标志不可靠，以实测为准）', hint: '守护进程在，但扩展没有在轮询：打开 Chrome 确认 dsh-fetch-page 扩展已启用，然后重试' },
     { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: 'jar 可用（10 个 cookie，3 个会话级），导出时间 2026/9/28 16:37:16', hint: '含会话级 cookie：浏览器一关就失效，需要时重新导出' },
@@ -133,22 +142,34 @@
     return realFetch(input, init)
   }
 
+  let sidebarBody
+  let tabType
   const ctx = {
     slots: {
-      inject: (_name, callback) => callback(),
-      register: (_options, component) => { window.__PANEL__ = component; return () => undefined },
+      inject: (name, callback) => { window.__HARNESS__.slots = [...(window.__HARNESS__.slots ?? []), name]; callback() },
+      register: (options, component) => {
+        if (options.key !== undefined) sidebarBody = component
+        else window.__PANEL__ = component
+        return () => undefined
+      },
     },
-    // No sessions/workspaces in the harness: the "处理" button then reports the
-    // graceful message the real panel gives when those services are absent.
-    get: () => undefined,
-    effect: () => undefined,
+    // 侧边栏页签类型走 ctx.inject(['sidebarRightTabs'], …)
+    inject: (deps, callback) => callback({
+      get: (name) => (name === 'sidebarRightTabs'
+        ? { register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined } }
+        : undefined),
+    }),
+    get: (name) => (name === 'betterSidebar' ? { openTab: (tab) => { window.__HARNESS__.openedTab = tab } } : undefined),
+    // cordis calls the effect body; the seat registrations live inside one, so a
+    // no-op stub here would silently skip them (it did).
+    effect: (callback) => { const dispose = callback(); return dispose },
   }
 </script>
 
 <script src="vendor/client.js"></script>
 
 <script>
-  const clipMount = () => (CLIPPED ? 'clipRoot' : AUTOHEIGHT ? 'autoRoot' : 'root')
+  const clipMount = () => (SIDEBAR ? 'sideRoot' : CLIPPED ? 'clipRoot' : AUTOHEIGHT ? 'autoRoot' : 'root')
   const status = document.getElementById('status')
   try {
     if (definition === undefined) throw new Error('bundle 没有调用 window.__ModuleLoader__.load')
@@ -158,11 +179,16 @@
     })
     window.__HARNESS__.module = module
     module.apply(ctx)
-    if (window.__PANEL__ === undefined) throw new Error('apply() 没有注册面板组件')
+    // The sidebar variant renders the *pane body* the plugin registered for
+    // `sidebar.right.pane.tab`; every other variant renders the floating panel.
+    const target = SIDEBAR ? sidebarBody : window.__PANEL__
+    if (target === undefined) {
+      throw new Error(SIDEBAR ? 'apply() 没有注册侧边栏主体' : 'apply() 没有注册面板组件')
+    }
 
-    window.__HARNESS__.mountPoint = CLIPPED ? 'clipRoot' : 'root'
+    window.__HARNESS__.mountPoint = SIDEBAR ? 'sideRoot' : CLIPPED ? 'clipRoot' : 'root'
     window.ReactDOM.createRoot(document.getElementById(clipMount())).render(
-      window.React.createElement(window.__PANEL__, {}),
+      window.React.createElement(target, {}),
     )
     window.__HARNESS__.ready = true
     status.textContent = 'bundle 已挂载（id=' + definition.id + '，inject=' + JSON.stringify(module.inject) + '）'
@@ -186,7 +212,7 @@
       }
     }
     // `?auto=0` keeps the drawer closed so the right-edge tab can be measured.
-    if (params.get('auto') !== '0') {
+    if (params.get('auto') !== '0' && !SIDEBAR) {
       setTimeout(() => { window.__HARNESS__.openPanel().catch((error) => { window.__HARNESS__.error = String(error) }) }, 120)
     }
   } catch (error) {

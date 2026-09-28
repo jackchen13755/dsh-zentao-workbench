@@ -26,9 +26,22 @@ import { ZentaoPanel, type PanelDeps } from './panel.js'
  */
 export const inject = ['slots']
 
+/** Registration identity shared by the sidebar tab registry and the pane body. */
+export const SIDEBAR_TYPE = 'dsh-zentao-workbench:panel'
+/**
+ * The native kind this panel claims. It must be unique across plugins: claiming
+ * a kind another plugin owns makes `tabs.register` throw and — per dsh-file-tree's
+ * own notes — takes the rest of that registration pass with it.
+ */
+export const SIDEBAR_KIND = 'dsh-zentao-workbench:zentao'
+
 interface SlotsService {
   inject(name: string, callback: () => void | (() => void)): void
-  register(options: { name: string, id: string, order?: number }, component: (props: unknown) => unknown): () => void
+  /** `key` targets one tab type when the seat dispatches `sidebar.right.pane.tab`. */
+  register(
+    options: { name: string, id?: string, key?: string, order?: number, inject?: (sessionId?: string) => Record<string, unknown> },
+    component: (props: unknown) => unknown,
+  ): () => void
 }
 
 interface SessionListLike { getSnapshot(): { current?: string } }
@@ -49,9 +62,20 @@ interface WorkspacesFace {
   connectWorkspace(id: string): Promise<string>
 }
 
+interface NativeTabType {
+  register(definition: { id: string, kind: string, title: () => string }): () => void
+}
+
+interface SidebarController {
+  /** Opens (or focuses) a native sidebar tab of the given type. */
+  openTab?: (target: { type: string }, scope?: unknown) => void
+}
+
 interface ClientContext {
   readonly slots: SlotsService
   effect(callback: () => void | (() => void), label?: string): void
+  /** cordis: run `callback` once the listed services exist. */
+  inject?(inject: string[], callback: (context: ClientContext) => void | (() => void)): unknown
   /** Optional services, read without a hard dependency. */
   get?(name: string): unknown
 }
@@ -105,12 +129,47 @@ async function callHost(endpoint: string, payload?: unknown): Promise<ZentaoCall
 }
 
 export function apply(ctx: ClientContext): void {
-  const deps: PanelDeps = {
-    call: callHost,
-    handlePrompt: buildHandlePrompt(ctx),
+  const base = { call: callHost, handlePrompt: buildHandlePrompt(ctx) }
+
+  /**
+   * Open the workbench in the native right sidebar.
+   *
+   * Returns whether it worked, so the floating tab can fall back to its own
+   * drawer on a host whose sidebar is composed differently.
+   */
+  const openInSidebar = (): boolean => {
+    try {
+      const sidebar = ctx.get?.('betterSidebar') as SidebarController | undefined
+      if (sidebar?.openTab === undefined) return false
+      sidebar.openTab({ type: SIDEBAR_TYPE })
+      return true
+    } catch {
+      // `get` is strict on cordis: an absent service throws rather than
+      // returning undefined, and a missing sidebar must not break the tab.
+      return false
+    }
   }
+
+  // 1) the native tab type — this is what puts 「禅道」 in the sidebar's tab list
+  ctx.effect(() => {
+    if (ctx.inject === undefined) return undefined
+    return ctx.inject(['sidebarRightTabs'], (scoped) => {
+      const tabs = scoped.get?.('sidebarRightTabs') as NativeTabType | undefined
+      if (tabs === undefined) return undefined
+      const dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
+      return () => { dispose() }
+    }) as () => void
+  }, 'dsh-zentao-workbench: native sidebar tab')
+
+  // 2) the tab body — same component, inline variant (no floating tab/drawer)
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab', key: SIDEBAR_TYPE, inject: () => ({}) },
+    (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...base, variant: 'sidebar' }),
+  )), 'dsh-zentao-workbench: sidebar pane body')
+
+  // 3) the floating tab, which now doubles as the sidebar entry
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(
     { name: 'shell.overlay', id: 'zentao-workbench', order: 12 },
-    (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...deps }),
+    (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...base, openInSidebar }),
   ))
 }

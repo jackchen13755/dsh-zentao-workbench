@@ -177,9 +177,28 @@ function richValue(value: unknown): ReactNode {
   if (!/<\s*[a-z][\s\S]*?>/i.test(text)) return text.length > 200 ? `${text.slice(0, 200)}…` : text
   return createElement('div', {
     'data-zentao-rich-value': '1',
-    dangerouslySetInnerHTML: { __html: clientSanitize(text) },
-    style: { flex: 1, wordBreak: 'break-word', lineHeight: 1.55 },
+    dangerouslySetInnerHTML: { __html: compactHtml(clientSanitize(text)) },
+    style: { flex: 1, wordBreak: 'break-word', lineHeight: 1.5 },
   }, null)
+}
+
+/**
+ * Squeeze a form template's filler whitespace.
+ *
+ * ZenTao's `detail_reason` default is padded with empty paragraphs and runs of
+ * `<br />` to reserve writing space. Rendered verbatim it became a tall block the
+ * user had to scroll through to see two lines of text (their report), so the
+ * filler is collapsed — the writing space belongs in the ZenTao form, not in a
+ * read-only preview.
+ */
+function compactHtml(html: string): string {
+  return html
+    .replace(/<p>\s*(?:&nbsp;|\s|<br\s*\/?>)*<\/p>/gi, '')
+    .replace(/(?:<br\s*\/?>\s*){2,}/gi, '<br />')
+    .replace(/^(?:\s|<br\s*\/?>)+/i, '')
+    .replace(/(?:\s|<br\s*\/?>)+$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }
 
 /** Mirror of the host's sanitiser: no scripts, handlers or javascript: URLs. */

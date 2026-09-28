@@ -104,6 +104,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [flash, setFlash] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [account, setAccount] = useState('')
+  const [password, setPassword] = useState('')
   const drag = useRef<{ active: boolean, dx: number, dy: number }>({ active: false, dx: 0, dy: 0 })
 
   const call = useCallback(async (endpoint: string, payload?: unknown): Promise<unknown> => {
@@ -297,7 +299,42 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             }
           },
           style: { cursor: 'pointer' },
-        }, busy === 'export' ? '导出中…' : '重新导出 cookie'))))
+        }, busy === 'export' ? '导出中…' : '重新导出 cookie')),
+      createElement('div', { style: { marginTop: 12, paddingTop: 8, borderTop: `1px solid ${TOKEN.line}` } },
+        createElement('div', { style: { color: TOKEN.dim, marginBottom: 4 } }, '或直接用账号密码登录（口令只在本次请求内存里，不落盘、不进日志）：'),
+        createElement('div', { style: { display: 'flex', gap: 6 } },
+          createElement('input', {
+            placeholder: '账号',
+            value: account,
+            onChange: (event: { target: { value: string } }) => setAccount(event.target.value),
+            style: { flex: 1, minWidth: 0 },
+          }),
+          createElement('input', {
+            placeholder: '密码',
+            type: 'password',
+            value: password,
+            onChange: (event: { target: { value: string } }) => setPassword(event.target.value),
+            style: { flex: 1, minWidth: 0 },
+          }),
+          createElement('button', {
+            type: 'button',
+            disabled: account === '' || password === '' || busy === 'login',
+            style: { cursor: account === '' || password === '' ? 'not-allowed' : 'pointer' },
+            onClick: async () => {
+              setBusy('login')
+              try {
+                const value = await call('login', { account, password }) as { detail: string }
+                setPassword('')
+                setFlash(value.detail)
+                await refreshStatus(true)
+              } catch (problem) {
+                setPassword('')
+                setError((problem as Error).message)
+              } finally {
+                setBusy('')
+              }
+            },
+          }, busy === 'login' ? '登录中…' : '登录')))))
   } else {
     body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
       createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1 } },

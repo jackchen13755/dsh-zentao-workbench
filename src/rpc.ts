@@ -134,6 +134,24 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
           return { ok: true, value: { plan: run.plan, outcome: run.outcome ?? null } }
         }
 
+        case 'login': {
+          const account = String(body.account ?? '').trim()
+          const password = typeof body.password === 'string' ? body.password : ''
+          if (account === '' || password === '') return fail('bad-request', '缺少 account 或 password')
+          const result = await session.login(account, password)
+          // The password never leaves this call: it is not stored, not logged,
+          // and the resulting cookie lives in the session's memory only.
+          if (!result.ok) return fail('login-failed', result.detail)
+          const status = await session.status(true)
+          return { ok: true, value: { detail: result.detail, status } }
+        }
+
+        case 'logout': {
+          session.clearRuntimeCookie()
+          const status = await session.status(true)
+          return { ok: true, value: { status } }
+        }
+
         case 'refreshCookies': {
           if (typeof deps.exportScript !== 'string' || deps.exportScript === '') {
             return fail('unavailable', '未配置 cookie 导出脚本（exportScript）')

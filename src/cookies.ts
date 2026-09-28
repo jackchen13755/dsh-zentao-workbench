@@ -11,7 +11,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -73,6 +73,29 @@ export async function readCookieJar(host: string, paths = defaultJarPaths()): Pr
     }
   }
   return null
+}
+
+/**
+ * Write a Netscape jar with 0600 permissions.
+ *
+ * Only ever called from an explicit opt-in (`zentao login --save-jar <path>`):
+ * by default the plugin keeps credentials in memory, because a jar on disk is a
+ * credential at rest and the measured `zentaosid` dies with the browser anyway.
+ */
+export async function writeCookieJar(path: string, host: string, cookieHeader: string): Promise<void> {
+  const expiry = Math.floor(Date.now() / 1000) + 12 * 3600
+  const lines = [
+    '# Netscape HTTP Cookie File',
+    '# Written by dsh-zentao-workbench (explicit --save-jar)',
+    ...cookieHeader.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '').map((pair) => {
+      const index = pair.indexOf('=')
+      const name = pair.slice(0, index)
+      const value = pair.slice(index + 1)
+      return [host, 'FALSE', '/', 'FALSE', String(expiry), name, value].join('\t')
+    }),
+    '',
+  ]
+  await writeFile(path, lines.join('\n'), { mode: 0o600 })
 }
 
 export interface JarRefreshResult {

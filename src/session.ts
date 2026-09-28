@@ -14,6 +14,7 @@
  */
 
 import { DEFAULT_BRIDGE_URL, bridgeDaemonStatus, bridgeForward } from './bridge.js'
+import { formLogin } from './login.js'
 import { defaultJarPaths, readCookieJar, type CookieJar } from './cookies.js'
 import { sessionExpired } from './parse.js'
 
@@ -76,6 +77,9 @@ export class ZenTaoSession {
   private readonly probeTtlMs: number
   private cachedJar: CookieJar | null = null
   private lastProbe: { at: number, status: SessionStatus } | null = null
+  /** Cookie obtained from an explicit account/password login — memory only. */
+  private runtimeCookie = ''
+  private loginAttempted = false
 
   constructor(options: SessionOptions = {}) {
     // Resolve the environment first: `server`/`bridgeUrl` read from it, and an
@@ -94,6 +98,45 @@ export class ZenTaoSession {
     if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
     if (this.server === '') throw new Error('未配置禅道实例地址：请在插件配置里设置 server（例如 https://zentao.example.com）')
     return `${this.server}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`
+  }
+
+  /**
+   * Adopt a cookie obtained out-of-band (form login, or an operator pasting one).
+   * Kept in memory: this plugin never writes a credential to disk on its own.
+   */
+  setRuntimeCookie(cookie: string): void {
+    this.runtimeCookie = cookie.trim()
+    this.lastProbe = null
+  }
+
+  clearRuntimeCookie(): void {
+    this.runtimeCookie = ''
+    this.loginAttempted = false
+    this.lastProbe = null
+  }
+
+  hasRuntimeCookie(): boolean {
+    return this.runtimeCookie !== ''
+  }
+
+  /** Log in with credentials and adopt the resulting cookie for this process. */
+  async login(account: string, password: string, signal?: AbortSignal): Promise<{ ok: boolean, detail: string }> {
+    const result = await formLogin({ baseUrl: this.server, account, password, signal })
+    if (result.ok) {
+      this.setRuntimeCookie(result.cookie)
+      this.loginAttempted = true
+    }
+    return { ok: result.ok, detail: result.detail }
+  }
+
+  /** Host the jar should be keyed to (used by the CLI's explicit --save-jar). */
+  hostForJar(): string {
+    return this.host()
+  }
+
+  /** The in-memory login cookie — exposed only for an explicit opt-in write. */
+  runtimeCookieForJar(): string {
+    return this.runtimeCookie
   }
 
   /** Jar paths, for display only — a client must never receive cookie values. */
@@ -126,7 +169,7 @@ export class ZenTaoSession {
     const attempts: StrategyProbe[] = []
 
     for (const strategy of this.order()) {
-      if (strategy === 'form-login') {
+      if (strategy === 'form-login' && !(await this.ensureRuntimeCookie())) {
         attempts.push(this.formLoginProbe())
         continue
       }
@@ -268,16 +311,47 @@ export class ZenTaoSession {
   }
 
   private order(): StrategyId[] {
-    return ['bridge', 'cookie-jar', 'manual']
+    // A cookie obtained from an explicit login is the freshest credential there
+    // is, so it leads; otherwise the browser bridge (no secret handled by us)
+    // comes first and the jar is the fallback.
+    return this.runtimeCookie !== ''
+      ? ['form-login', 'bridge', 'cookie-jar', 'manual']
+      : ['bridge', 'cookie-jar', 'manual', 'form-login']
+  }
+
+  /**
+   * Lazily log in from `ZENTAO_ACCOUNT` / `ZENTAO_PASSWORD` when every other
+   * strategy failed. Only ever attempted once per session object: a wrong
+   * password must not turn into a retry loop.
+   */
+  private async ensureRuntimeCookie(): Promise<boolean> {
+    if (this.runtimeCookie !== '') return true
+    if (this.loginAttempted) return false
+    const account = this.env.ZENTAO_ACCOUNT?.trim() ?? ''
+    const password = this.env.ZENTAO_PASSWORD ?? ''
+    if (account === '' || password === '') return false
+    this.loginAttempted = true
+    const result = await formLogin({ baseUrl: this.server, account, password })
+    if (!result.ok) return false
+    this.runtimeCookie = result.cookie
+    return true
   }
 
   private formLoginProbe(): StrategyProbe {
+    if (this.runtimeCookie !== '') {
+      return { id: 'form-login', label: LABELS['form-login'], ready: true, detail: '已用账号密码登录（Cookie 仅存本进程内存）' }
+    }
+    const account = this.env.ZENTAO_ACCOUNT?.trim() ?? ''
+    const hasPassword = (this.env.ZENTAO_PASSWORD ?? '') !== ''
+    if (account !== '' && hasPassword) {
+      return { id: 'form-login', label: LABELS['form-login'], ready: true, detail: `已配置账号 ${account}，前面的策略都失败时会自动登录（仅尝试一次）` }
+    }
     return {
       id: 'form-login',
       label: LABELS['form-login'],
       ready: false,
-      detail: '表单账密登录尚未实现（里程碑 M4）',
-      hint: '当前请用浏览器桥或 cookie jar；这两条都不通时再考虑账密登录',
+      detail: '没有可用的账密凭据',
+      hint: '面板里点「账密登录」，或设环境变量 ZENTAO_ACCOUNT / ZENTAO_PASSWORD（不要写进插件配置）',
     }
   }
 
@@ -309,7 +383,11 @@ export class ZenTaoSession {
       if (res.error) throw new Error(res.error)
       return { status: res.status ?? 200, body: String(res.body ?? ''), strategy, url }
     }
-    const cookie = strategy === 'manual' ? (this.env.ZENTAO_COOKIE ?? '').trim() : (await this.jar())?.cookieHeader ?? ''
+    const cookie = strategy === 'form-login'
+      ? this.runtimeCookie
+      : strategy === 'manual'
+        ? (this.env.ZENTAO_COOKIE ?? '').trim()
+        : (await this.jar())?.cookieHeader ?? ''
     if (cookie === '') throw new Error('没有可用的 Cookie')
     const res = await fetch(url, {
       method: init.method,

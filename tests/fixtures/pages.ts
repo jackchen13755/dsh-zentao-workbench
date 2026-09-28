@@ -117,3 +117,19 @@ export function loginFormPage(): string {
 <input type="text" name="account" /><input type="password" name="password" />
 </form></body></html>`
 }
+
+/** The login form as measured: plain `password` + a hidden `verifyRand`. */
+export function loginPageFixture(verifyRand = '1134243522'): string {
+  return `<html><body><form method='post' target='hiddenwin'>
+  <input class='form-control' type='text' name='account' id='account' />
+  <input class='form-control' type='password' name='password' />
+  <input type='checkbox' name='keepLogin[]' value='on' id='keepLoginon' />
+  <input type='hidden' name='referer' id='referer' value='' />
+  <input type='hidden' name='verifyRand' id='verifyRand' value='${verifyRand}' />
+</form></body></html>`
+}
+
+/** The measured refusal: HTTP 200, ~295 bytes, an alert naming the credentials. */
+export function loginFailureFixture(message = '登录失败，请检查您的用户名或密码是否填写正确。'): string {
+  return `<html><meta charset='utf-8'/><script>alert('${message}');self.location='/index.php?m=user&f=login';</script></html>`
+}

@@ -19,13 +19,16 @@ import { resolveBug, ZentaoWorkbench } from './zentao.js'
 const VALUE_FLAGS = new Set([
   'server', 'limit', 'only', 'build', 'history', 'resolution', 'reason',
   'detail', 'impact', 'comment', 'assigned-to', 'in-charged-by', 'cookie-jar', 'bridge-url',
+  'account', 'save-jar',
 ])
-const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help'])
+const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help', 'password-stdin'])
 
 const USAGE = `用法：
   zentao status   [--json]
   zentao bugs     [--limit 30] [--only all|open|resolved] [--refresh] [--json]
   zentao context  <bugID> [--build X] [--history 5] [--refresh] [--json]
+  zentao login    --account A          （密码读 ZENTAO_PASSWORD，或 --password-stdin）
+                  [--save-jar <path>]  （可选：把会话写成 0600 jar 供其它工具复用）
   zentao resolve  <bugID> [--resolution R] [--reason R] [--detail T|@file]
                           [--impact T|@file] [--comment T] [--build B]
                           [--assigned-to U] [--in-charged-by U] [--dry-run] [--force] [--json]
@@ -33,6 +36,13 @@ const USAGE = `用法：
 通用参数：--server <实例地址>（也可用 ZENTAO_BASE）、--cookie-jar <路径>、--bridge-url <daemon>
 环境变量：ZENTAO_BASE、ZENTAO_COOKIE_JAR、ZENTAO_COOKIE、DAEMON_URL
 退出码：0 成功 · 1 用法/会话失败 · 2 计划被拦或服务端拒绝`
+
+/** Read a password from stdin (the safe way to pass one on a shared machine). */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8').trim()
+}
 
 interface ParsedArgs {
   command: string
@@ -144,6 +154,36 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           io.out(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}\n`)
         }
         if (result.bugs.length === 0) io.out('  （没有匹配的单据）\n')
+        return 0
+      }
+
+      case 'login': {
+        const account = flag(parsed, 'account') ?? ''
+        if (account === '') {
+          io.err('zentao: 缺少 --account\n')
+          return 1
+        }
+        const fromStdin = parsed.flags.get('password-stdin') === true
+        const password = fromStdin ? (await readStdin()).trim() : (process.env.ZENTAO_PASSWORD ?? '')
+        if (password === '') {
+          io.err('zentao: 没有密码 —— 设 ZENTAO_PASSWORD，或用 --password-stdin 从标准输入读（避免出现在 ps 里）\n')
+          return 1
+        }
+        const result = await session.login(account, password)
+        if (!result.ok) {
+          io.err(`zentao: 登录失败 —— ${result.detail}\n`)
+          return 1
+        }
+        io.out(`${result.detail}\n`)
+        const saveJar = flag(parsed, 'save-jar')
+        if (saveJar !== undefined && saveJar !== '') {
+          // Explicit opt-in only: the default keeps the credential in memory.
+          const { writeCookieJar } = await import('./cookies.js')
+          await writeCookieJar(saveJar, session.hostForJar(), session.runtimeCookieForJar())
+          io.out(`已写入 cookie jar：${saveJar}（0600）\n`)
+        }
+        const status = await session.status(true)
+        io.out(`${renderStatus(status)}\n`)
         return 0
       }
 

@@ -23,6 +23,12 @@ export interface PanelDeps {
   /** Open the native sidebar tab; returns false when this host has no sidebar. */
   openInSidebar?: () => boolean
   /**
+   * Whether the native sidebar is already hosting this panel. When it is, the
+   * right-edge tab is not rendered at all — it would be a second, redundant
+   * entry to the same workbench.
+   */
+  hasSidebar?: () => boolean
+  /**
    * One panel call. Implemented by the browser half as a POST to
    * {@link ZENTAO_FETCH_PATH} — the transport this Host actually mounts.
    */
@@ -552,6 +558,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
+  // Sidebar hosts the panel → no floating entry, no drawer.
+  if (!inline && deps.hasSidebar?.() === true) return null
   if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true

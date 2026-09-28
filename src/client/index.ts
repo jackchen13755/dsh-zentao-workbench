@@ -135,6 +135,9 @@ async function callHost(endpoint: string, payload?: unknown): Promise<ZentaoCall
 }
 
 export function apply(ctx: ClientContext): void {
+  /** True once the native sidebar is hosting the panel (then the tab hides). */
+  let sidebarReady = false
+
   /**
    * Services for the 处理/一键修复 buttons, captured when they become visible.
    *
@@ -185,7 +188,10 @@ export function apply(ctx: ClientContext): void {
       const tabs = scoped.get?.('sidebarRightTabs') as NativeTabType | undefined
       if (tabs === undefined) return undefined
       const dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
-      return () => { dispose() }
+      // From here on the right-edge button is redundant: the sidebar hosts the
+      // panel. It is kept only as a fallback for a host without that service.
+      sidebarReady = true
+      return () => { sidebarReady = false; dispose() }
     }) as () => void
   }, 'dsh-zentao-workbench: native sidebar tab')
 
@@ -198,6 +204,11 @@ export function apply(ctx: ClientContext): void {
   // 3) the floating tab, which now doubles as the sidebar entry
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(
     { name: 'shell.overlay', id: 'zentao-workbench', order: 12 },
-    (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...base, openInSidebar }),
+    (props) => createElement(ZentaoPanel, {
+      ...(props as Record<string, unknown>),
+      ...base,
+      openInSidebar,
+      hasSidebar: () => sidebarReady,
+    }),
   ))
 }

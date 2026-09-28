@@ -50,6 +50,7 @@ const flush = async (rounds = 6): Promise<void> => {
 function mount(
   rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>,
   handlePrompt: (text: string) => Promise<void> = async () => undefined,
+  options: { sidebar?: boolean } = {},
 ) {
   // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
   // stub replaces global fetch instead of injecting an rpc service.
@@ -151,7 +152,9 @@ function mount(
       },
     },
     get: () => undefined,
-    effect: () => undefined,
+    // cordis runs the effect body; the native-tab registration lives inside one,
+    // so a no-op here would silently skip it (it did, in the harness too).
+    effect: (callback: () => unknown) => callback(),
   }
   // The panel's "处理"/"一键修复"/"批量引用" go through the real
   // `buildHandlePrompt`, which opens a conversation via sessions/workspaces.
@@ -168,7 +171,15 @@ function mount(
   }
   const ctxWithServices = {
     ...ctx,
-    inject: (deps: string[], callback: (context: unknown) => unknown) => callback({ sessions, workspaces }),
+    inject: (deps: string[], callback: (context: unknown) => unknown) => callback({
+      sessions,
+      workspaces,
+      // Opt-in: with the sidebar service present the panel must NOT render its
+      // floating entry (the sidebar hosts it), which would break every other test.
+      ...(options.sidebar === true
+        ? { get: (name: string) => (name === 'sidebarRightTabs' ? { register: () => () => undefined } : undefined) }
+        : {}),
+    }),
   }
   ;(module.apply as (context: unknown) => void)(ctxWithServices)
   if (component === undefined) throw new Error('panel did not register')
@@ -458,6 +469,23 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(resolve.props.onClick as () => void)()
     await settle()
     expect(calls.filter((endpoint) => endpoint === 'resolveSubmit')).toHaveLength(2)
+  })
+
+  it('hides its floating entry once the native sidebar hosts the panel', async () => {
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [], total: 0, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+    const withSidebar = mount(rpc, undefined, { sidebar: true })
+    const tree = await withSidebar.settle()
+    // Nothing at all: no right-edge tab, and no drawer parked off-screen.
+    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeUndefined()
+    expect(find(tree, (element) => element.props['data-zentao-panel'] === '1')).toBeUndefined()
   })
 
   it('opens a detail card when a row is clicked', async () => {

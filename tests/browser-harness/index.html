@@ -145,6 +145,17 @@
     return realFetch(input, init)
   }
 
+  // 会话服务按真实契约提供（inject + 属性读取），这样「🚀 一键修复」等按钮在
+  // harness 里也能真的跑通：发出的提示词记到 window.__HARNESS__.prompts。
+  const sessions = {
+    list: { getSnapshot: () => ({ current: 's1' }) },
+    open: () => undefined,
+    scope: () => ({ get: () => ({ send: async (text) => { (window.__HARNESS__.prompts ??= []).push(text) } }) }),
+  }
+  const workspaces = {
+    list: { getSnapshot: () => ({ items: [{ workspaceId: 'w1', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }) },
+    connectWorkspace: async () => 's2',
+  }
   let sidebarBody
   let tabType
   const ctx = {
@@ -156,12 +167,16 @@
         return () => undefined
       },
     },
-    // 侧边栏页签类型走 ctx.inject(['sidebarRightTabs'], …)
-    inject: (deps, callback) => callback({
-      get: (name) => (name === 'sidebarRightTabs'
-        ? { register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined } }
-        : undefined),
-    }),
+    // 侧边栏页签类型走 ctx.inject(['sidebarRightTabs'], …)。该服务**只在
+    // variant=sidebar 时**提供：一旦提供，插件会认为侧边栏已接管，从而不再渲染
+    // 右缘入口（这正是要验证的行为），浮层变体也就没东西可点了。
+    inject: (deps, callback) => (SIDEBAR
+      ? callback({
+          get: (name) => (name === 'sidebarRightTabs'
+            ? { register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined } }
+            : undefined),
+        })
+      : callback({ get: () => undefined, sessions, workspaces })),
     // No `betterSidebar` here: the entry then falls back to the floating drawer,
     // which is what the harness exercises. The sidebar path (openTab) is pinned
     // by the unit test instead.

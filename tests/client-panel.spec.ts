@@ -1,0 +1,267 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+/**
+ * Drive the compiled panel with a minimal hooks runtime.
+ *
+ * The loader smoke test proves the bundle mounts; this proves the panel *does
+ * something*: its effects run, a refresh hits the endpoints the design promises,
+ * and the rendered tree carries what the user was told to look for (the refresh
+ * button, the list, the detail card). No browser is involved, so it runs in CI.
+ */
+
+interface Element { type: unknown, props: Record<string, unknown>, children: unknown[] }
+
+function textOf(node: unknown, out: string[] = []): string[] {
+  if (typeof node === 'string' || typeof node === 'number') out.push(String(node))
+  else if (Array.isArray(node)) node.forEach((child) => textOf(child, out))
+  else if (node !== null && typeof node === 'object') {
+    const element = node as Element
+    if (typeof element.type === 'function') textOf((element.type as (props: unknown) => unknown)(element.props), out)
+    else element.children.forEach((child) => textOf(child, out))
+  }
+  return out
+}
+
+/** Find the first element whose props satisfy the predicate. */
+function find(node: unknown, predicate: (element: Element) => boolean): Element | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = find(child, predicate)
+      if (hit !== undefined) return hit
+    }
+    return undefined
+  }
+  if (node === null || typeof node !== 'object') return undefined
+  const element = node as Element
+  if (typeof element.type === 'function') return find((element.type as (props: unknown) => unknown)(element.props), predicate)
+  if (predicate(element)) return element
+  for (const child of element.children) {
+    const hit = find(child, predicate)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+const flush = async (rounds = 6): Promise<void> => {
+  for (let index = 0; index < rounds; index++) await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>) {
+  const source = readFileSync('lib/client.js', 'utf8')
+  let definition: { factory: (require: (name: string) => unknown) => Record<string, unknown> } | undefined
+
+  const slots: unknown[] = []
+  const refs: unknown[] = []
+  const effects: Array<{ deps?: readonly unknown[], cleanup?: void | (() => void), run: () => void | (() => void) }> = []
+  let cursor = 0
+  let effectCursor = 0
+  let dirty = false
+  const scheduled: Array<() => void> = []
+
+  const hooks = {
+    createElement(type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]): Element {
+      return { type, props: props ?? {}, children }
+    },
+    useState<S>(initial: S | (() => S)): [S, (value: S | ((previous: S) => S)) => void] {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? (initial as () => S)() : initial
+      return [slots[index] as S, (value) => {
+        slots[index] = typeof value === 'function' ? (value as (previous: S) => S)(slots[index] as S) : value
+        dirty = true
+      }]
+    },
+    useRef<T>(initial: T): { current: T } {
+      const index = cursor++
+      if (!(index in refs)) refs[index] = { current: initial }
+      return refs[index] as { current: T }
+    },
+    useCallback<T>(callback: T): T {
+      cursor++ // keeps slot alignment with useRef/useState in the same component
+      return callback
+    },
+    useMemo<T>(factory: () => T): T {
+      cursor++
+      return factory()
+    },
+    useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void {
+      const index = effectCursor++
+      effects[index] = { deps, run: effect }
+    },
+  }
+
+  const win: Record<string, unknown> = {
+    __ModuleLoader__: { load: (value: typeof definition) => { definition = value } },
+    innerWidth: 1440,
+    innerHeight: 900,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    setInterval: () => 0,
+    clearInterval: () => undefined,
+    setTimeout: () => 0,
+    clearTimeout: () => undefined,
+    confirm: () => true,
+  }
+  const require = (name: string): unknown => {
+    if (name === 'react') return hooks
+    throw new Error(`unexpected require ${name}`)
+  }
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'navigator', 'document', source)(win, { clipboard: { writeText: async () => undefined } }, {})
+
+  const module = definition!.factory(require)
+  let component: ((props: unknown) => unknown) | undefined
+  const ctx = {
+    slots: {
+      inject: (_name: string, callback: () => void) => callback(),
+      register: (_options: Record<string, unknown>, value: (props: unknown) => unknown) => {
+        component = value
+        return () => undefined
+      },
+    },
+    connection: { rpc: { call: async (_channel: string, endpoint: string, payload?: unknown) => rpc(endpoint, payload) } },
+    get: () => undefined,
+    effect: () => undefined,
+  }
+  ;(module.apply as (context: unknown) => void)(ctx)
+  if (component === undefined) throw new Error('panel did not register')
+
+  const render = (): Element => {
+    cursor = 0
+    effectCursor = 0
+    const outer = component!({}) as Element
+    const tree = (outer.type as (props: unknown) => unknown)(outer.props) as Element
+    // Run effects whose deps changed (first render always runs).
+    for (const effect of effects) {
+      if (effect === undefined) continue
+      const previous = (effect as { previousDeps?: readonly unknown[] }).previousDeps
+      const changed = previous === undefined || effect.deps === undefined
+        || effect.deps.length !== previous.length
+        || effect.deps.some((value, index) => value !== previous[index])
+      if (!changed) continue
+      effect.cleanup?.()
+      effect.cleanup = effect.run() ?? undefined
+      ;(effect as { previousDeps?: readonly unknown[] }).previousDeps = effect.deps
+    }
+    return tree
+  }
+
+  const settle = async (): Promise<Element> => {
+    let tree = render()
+    // Effects start async work; re-render while state keeps changing.
+    for (let round = 0; round < 8 && dirty; round++) {
+      dirty = false
+      await flush()
+      tree = render()
+    }
+    await flush()
+    dirty = false
+    return render()
+  }
+
+  void scheduled
+  return { settle, hooks }
+}
+
+describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
+  it('loads, then a refresh hits status + list, and the list renders', async () => {
+    const calls: string[] = []
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      calls.push(endpoint)
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return {
+          ok: true,
+          value: {
+            bugs: [
+              { id: '55036', title: '浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55036' },
+              { id: '55035', title: '另一个问题', severity: '次要', pri: '2', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55035' },
+            ],
+            total: 2,
+            via: 'bridge',
+            url: 'https://zt.example.com/index.php?m=my&f=bug',
+            fetchedAt: '2026-09-28T00:00:00.000Z',
+            cached: false,
+          },
+        }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+
+    const { settle } = mount(rpc)
+    let tree = await settle()
+
+    // Collapsed entry → open it the way a user would.
+    const entry = find(tree, (element) => element.type === 'button')!
+    ;(entry.props.onClick as () => void)()
+    tree = await settle()
+
+    // The panel had to load its data after opening.
+    expect(calls).toContain('listBugs')
+    const text = textOf(tree).join(' ')
+    expect(text).toContain('禅道工作台')
+    expect(text).toContain('刷新')
+    expect(text).toContain('55036')
+    expect(text).toContain('55035')
+
+    // The refresh button must re-read status AND the list (one refresh, whole view).
+    calls.length = 0
+    const refresh = find(tree, (element) => element.type === 'button' && String(element.children[0] ?? '').includes('刷新'))!
+    ;(refresh.props.onClick as () => void)()
+    await settle()
+    expect(calls.filter((endpoint) => endpoint === 'sessionStatus').length).toBeGreaterThanOrEqual(1)
+    expect(calls).toContain('listBugs')
+  })
+
+  it('opens a detail card when a row is clicked', async () => {
+    const calls: string[] = []
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      calls.push(endpoint)
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [{ id: '55036', title: '浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55036' }], total: 1, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      if (endpoint === 'bugContext') {
+        return {
+          ok: true,
+          value: {
+            bug: { id: '55036', title: '浮层问题', product: 'Demo', status: '激活', assignedTo: 'dev.one', url: 'https://zt.example.com/index.php?m=bug&f=view&bugID=55036' },
+            resolve: {
+              uid: 'kuid-1',
+              fields: [{ name: 'changeImpact', label: '代码变更影响范围', required: true }],
+              defaults: {},
+              resolutionOptions: [],
+              optionCounts: { resolvedBuild: 254, bugInchargedBy: 892, assignedTo: 892 },
+            },
+            histories: ['2026-08-18 16:27:16, 由 Dev One 创建。'],
+          },
+        }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button')!.props.onClick as () => void)()
+    tree = await settle()
+
+    // The row is a draggable div carrying an onClick.
+    const row = find(tree, (element) => element.type === 'div' && element.props.draggable === true)!
+    ;(row.props.onClick as () => void)()
+    tree = await settle()
+
+    expect(calls).toContain('bugContext')
+    const text = textOf(tree).join(' ')
+    expect(text).toContain('必填：代码变更影响范围')
+    expect(text).toContain('下拉规模 254/892/892')
+    // The drag payload must carry a real origin, not a placeholder host.
+    const payloads: string[] = []
+    ;(row.props.onDragStart as (event: unknown) => void)({ dataTransfer: { setData: (_type: string, value: string) => payloads.push(value) } })
+    expect(payloads[0]).toContain('https://zt.example.com/index.php?m=bug&f=view&bugID=55036')
+    expect(payloads[0]).toContain('先用 zentao_bug_context')
+  })
+})

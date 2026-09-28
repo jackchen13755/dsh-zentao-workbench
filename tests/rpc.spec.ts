@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createZentaoRpcHandler, ZENTAO_RPC_CHANNEL } from '../src/rpc.js'
 import { ZenTaoAuthError } from '../src/session.js'
 import { ZentaoWorkbench } from '../src/zentao.js'
-import { bugListPage, bugRow, bugViewPage, resolveFormPage } from './fixtures/pages.js'
+import { bugListPage, bugRow, bugViewPage, resolveFormPage, taskListPage } from './fixtures/pages.js'
 import { fakeSession } from './helpers/fake-session.js'
 
 const VIEW = '/index.php?m=bug&f=view&bugID=55036'
@@ -27,6 +27,7 @@ function world(options: { expired?: boolean, postOutcome?: 'ok' | 'alert' } = {}
       return { body: '<div>ok</div>' }
     }
     if (path === LIST) return bugListPage([bugRow({ id: '55036', title: '浮层问题' })])
+    if (path.startsWith('/index.php?m=project&f=task')) return taskListPage()
     if (path === FORM) {
       return resolveFormPage({
         uid: 'kuid-rpc',
@@ -72,6 +73,17 @@ describe('panel RPC channel', () => {
     expect(result.ok).toBe(true)
     const value = (result as { value: { bugs: Array<{ id: string }> } }).value
     expect(value.bugs.map((bug) => bug.id)).toEqual(['55036'])
+  })
+
+  it('answers the task list with the instance\'s own empty state', async () => {
+    const { handle } = world()
+    const result = await handle('listTasks', { limit: 10 })
+    expect(result.ok).toBe(true)
+    const value = (result as { value: { tasks: unknown[], empty: boolean, note: string } }).value
+    expect(value.tasks).toEqual([])
+    expect(value.empty).toBe(true)
+    // The note must say *why* it is empty, so nobody reads it as a parse failure.
+    expect(value.note).toContain('没有任务数据')
   })
 
   it('returns a structured failure — not a transport error — when the session is dead', async () => {

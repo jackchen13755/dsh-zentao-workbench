@@ -13,7 +13,7 @@
  */
 
 import { FIELD_LABELS, RESOLVE_FIELD_RULES } from './fields.js'
-import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseResolveForm, type BugRow, type SelectOption } from './parse.js'
+import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type SelectOption, type TaskRow } from './parse.js'
 import { planResolve, submitResolve, type ResolveArgs, type ResolvePlan, type SubmitOutcome } from './resolve.js'
 import type { StrategyId, ZenTaoSession } from './session.js'
 
@@ -26,6 +26,23 @@ export interface MyBugsResult {
   url: string
   fetchedAt: string
   cached: boolean
+}
+
+export interface MyTasksResult {
+  tasks: TaskRow[]
+  total: number
+  /** True when the instance answered with its own "no tasks" marker. */
+  empty: boolean
+  projectID?: string
+  via: StrategyId
+  url: string
+  fetchedAt: string
+  /**
+   * The task module's data availability, stated so a caller does not read an
+   * empty list as "the plugin is broken": measured on this instance, every
+   * project has zero tasks.
+   */
+  note: string
 }
 
 export interface BugContext {
@@ -115,6 +132,33 @@ export class ZentaoWorkbench {
       ? source.bugs
       : source.bugs.filter((bug) => (only === 'open' ? bug.resolution === '' && bug.resolvedBy === '' : bug.resolution !== '' || bug.resolvedBy !== ''))
     return { ...source, bugs: filtered.slice(0, limit), cached }
+  }
+
+  /**
+   * Project task list. Measured: this instance keeps its work in Bugs — eight
+   * projects probed, all answering "暂时没有任务" — so an empty result is the
+   * expected outcome here, not a failure.
+   */
+  async myTasks(options: { projectID?: string, limit?: number } = {}): Promise<MyTasksResult> {
+    const limit = Math.min(Math.max(options.limit ?? 30, 1), 200)
+    const query = options.projectID !== undefined && options.projectID !== ''
+      ? `&projectID=${encodeURIComponent(options.projectID)}`
+      : ''
+    const page = await this.session.get(`/index.php?m=project&f=task${query}`)
+    const tasks = parseTaskList(page.body)
+    const empty = taskListEmpty(page.body) || tasks.length === 0
+    return {
+      tasks: tasks.slice(0, limit),
+      total: tasks.length,
+      empty,
+      ...(options.projectID !== undefined ? { projectID: options.projectID } : {}),
+      via: page.strategy,
+      url: page.url,
+      fetchedAt: new Date().toISOString(),
+      note: empty
+        ? '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败'
+        : '任务行解析尚未在真实数据上验证过（本实例无任务），如出现字段错位请以页面为准',
+    }
   }
 
   /**

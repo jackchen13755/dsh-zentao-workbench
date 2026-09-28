@@ -215,6 +215,37 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(calls).toContain('listBugs')
   })
 
+  it('switches to the task tab and renders the instance\'s honest empty state', async () => {
+    const calls: string[] = []
+    const note = '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败'
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      calls.push(endpoint)
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [], total: 0, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      if (endpoint === 'listTasks') {
+        return { ok: true, value: { tasks: [], total: 0, empty: true, via: 'bridge', url: '', fetchedAt: '', note } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button')!.props.onClick as () => void)()
+    tree = await settle()
+
+    const tab = find(tree, (element) => element.type === 'button' && element.children[0] === '任务')!
+    expect(tab).toBeDefined()
+    ;(tab.props.onClick as () => void)()
+    tree = await settle()
+
+    expect(calls).toContain('listTasks')
+    expect(textOf(tree).join(' ')).toContain('没有任务数据')
+  })
+
   it('opens a detail card when a row is clicked', async () => {
     const calls: string[] = []
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {

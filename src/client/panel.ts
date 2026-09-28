@@ -37,6 +37,7 @@ interface BugRow {
   resolution: string
   href: string
 }
+interface TaskRow { id: string, name: string, status: string, assignedTo: string, href: string }
 interface BugContext {
   bug: { id: string, title: string, product: string, status: string, assignedTo: string, url: string }
   resolve: {
@@ -115,6 +116,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [flash, setFlash] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [tab, setTab] = useState<'bugs' | 'tasks'>('bugs')
+  const [tasks, setTasks] = useState<TaskRow[]>([])
+  const [taskNote, setTaskNote] = useState('')
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
   const drag = useRef<{ active: boolean, dx: number, dy: number, moved: boolean }>({ active: false, dx: 0, dy: 0, moved: false })
@@ -166,6 +170,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       if (next.authenticated) {
         const listed = await call('listBugs', { limit: 30, only, refresh: force }) as { bugs: BugRow[] }
         setBugs(listed.bugs)
+        if (tab === 'tasks') {
+          const taskValue = await call('listTasks', { limit: 30 }) as { tasks: TaskRow[], note: string }
+          setTasks(taskValue.tasks)
+          setTaskNote(taskValue.note)
+        }
         if (selected !== null) {
           setSelected(await call('bugContext', { bugID: selected.bug.id, refresh: force }) as BugContext)
           if (plan !== null) {
@@ -181,17 +190,32 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     } finally {
       setBusy('')
     }
-  }, [call, only, selected, plan])
+  }, [call, only, tab, selected, plan])
+
+  const refreshTasks = useCallback(async () => {
+    setBusy('tasks')
+    try {
+      const value = await call('listTasks', { limit: 30 }) as { tasks: TaskRow[], note: string }
+      setTasks(value.tasks)
+      setTaskNote(value.note)
+      setError('')
+    } catch (problem) {
+      setError((problem as Error).message)
+    } finally {
+      setBusy('')
+    }
+  }, [call])
 
   useEffect(() => { void refreshStatus(true) }, [refreshStatus])
 
   useEffect(() => {
     if (!open || config?.authenticated !== true) return undefined
     if (lastUpdated === null) void refreshAll(false)
+    if (tab === 'tasks' && tasks.length === 0 && taskNote === '') void refreshTasks()
     if (intervalMin <= 0) return undefined
     const timer = window.setInterval(() => { void refreshAll(true) }, intervalMin * 60_000)
     return () => window.clearInterval(timer)
-  }, [open, config?.authenticated, intervalMin, refreshAll, lastUpdated])
+  }, [open, config?.authenticated, intervalMin, refreshAll, lastUpdated, tab, tasks.length, taskNote, refreshTasks])
 
   useEffect(() => {
     if (flash === '') return undefined
@@ -353,7 +377,33 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             },
           }, busy === 'login' ? '登录中…' : '登录')))))
   } else {
-    body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
+    body.push(createElement('div', { key: 'tabs', style: { display: 'flex', gap: 4, padding: '8px 12px 0' } },
+      ...(['bugs', 'tasks'] as const).map((value) => createElement('button', {
+        key: value,
+        type: 'button',
+        onClick: () => setTab(value),
+        style: {
+          cursor: 'pointer',
+          border: 'none',
+          background: 'none',
+          color: tab === value ? TOKEN.text : TOKEN.dim,
+          fontWeight: tab === value ? 600 : 400,
+          borderBottom: tab === value ? `2px solid ${TOKEN.accent}` : '2px solid transparent',
+          padding: '2px 6px',
+        },
+      }, value === 'bugs' ? '我的 Bug' : '任务'))))
+
+    if (tab === 'tasks') {
+      body.push(createElement('div', { key: 'tasks', style: { padding: '10px 12px', maxHeight: 320, overflow: 'auto' } },
+        ...tasks.map((task) => createElement('div', { key: task.id, style: { padding: '6px 0', borderBottom: `1px solid ${TOKEN.line}` } },
+          createElement('div', null, `#${task.id} ${task.name}`),
+          createElement('div', { style: { color: TOKEN.dim, fontSize: 11 } }, `${task.status || '-'} · 指派 ${task.assignedTo || '-'}`))),
+        tasks.length === 0
+          ? createElement('div', { style: { color: TOKEN.dim, fontSize: 12 } }, taskNote || '加载中…')
+          : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
+    }
+
+    if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
       createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1 } },
         createElement('option', { value: 'open' }, '未解决'),
         createElement('option', { value: 'all' }, '全部')),

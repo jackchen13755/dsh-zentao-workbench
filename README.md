@@ -44,6 +44,7 @@
 |---|---|
 | `zentao_session_status` | 登录态与四策略探测结果（任何工具报未登录时先看它） |
 | `zentao_my_bugs` | 我的 Bug 列表（结构化，不回传 HTML；`only=open/resolved`） |
+| `zentao_tasks`* | 项目任务列表（`m=project&f=task`）。**实测本实例 8 个项目全部无任务** → 空态如实说明；行解析未在真实数据上验证（见下） |
 | `zentao_bug_context` | 一次读全一条单的解决上下文 |
 | `zentao_resolve_bug` | 解决：计划 → 本地校验 → 提交 → 回读验证（建议先 `dryRun`） |
 
@@ -52,6 +53,7 @@ CLI（`bin/zentao.mjs`，与工具共用同一套解析）：
 ```
 zentao status                     # 四条登录路径各探测到什么
 zentao bugs [--only open]         # 我的 Bug
+zentao tasks [--project 187]      # 项目任务（本实例为空，会说明原因）
 zentao context <bugID> [--json]   # 一次读全
 zentao resolve <bugID> [--dry-run]
 zentao login --account A          # 口令读 ZENTAO_PASSWORD 或 --password-stdin
@@ -99,7 +101,12 @@ host+client typecheck clean，并在真实实例上核对：我的 Bug 列表（
 （1792 字节 vs 原始表单 255592 字节）、真实单据 dryRun（`blocked=false`）、
 登录链路（错误凭据得到服务端原文判词）。
 
-尚未验证：面板在浏览器里的实机渲染（需重启 DSH）、以及一次**真实提交**
-（需指定一个可解决的 bug）。任务列表因该账号无任务数据而未实现。见 [DESIGN.md](DESIGN.md)。
+尚未验证：面板在浏览器里的实机渲染（需重启 DSH）、以及一次**真实提交**（需指定一个
+可解决的 bug）。
+
+**任务列表的诚实边界**：路由 `m=project&f=task`、过滤器与空态标记「暂时没有任务」都是
+实测的；但本实例**没有任何任务行**（8 个项目逐个探过，全为空），所以 `parseTaskList` 的
+行分支只对着合成样本测过 —— 它镜像实测的 Bug 列表形状，形状不符时返回空数组而不是
+臆造数据。面板「任务」页签会如实显示"没有任务数据，不是解析失败"。见 [DESIGN.md](DESIGN.md)。
 
 MIT。

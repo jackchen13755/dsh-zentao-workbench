@@ -98,6 +98,14 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
           return { ok: true, value: result }
         }
 
+        case 'listTasks': {
+          const result = await workbench.myTasks({
+            projectID: typeof body.projectID === 'string' ? body.projectID : undefined,
+            limit: numberOr(body.limit, 30),
+          })
+          return { ok: true, value: result }
+        }
+
         case 'bugContext': {
           const bugID = String(body.bugID ?? '').trim()
           if (bugID === '') return fail('bad-request', '缺少 bugID')

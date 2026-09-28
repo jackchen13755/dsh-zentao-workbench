@@ -263,7 +263,9 @@
   页面里的 `md5(md5(password)+rand)` 挂在并不存在的 `#verifyPassword` 上 → 表单发明文；
   **失败时也会下发 `zentaosid`**，所以必须回读真实页面判成功；服务端点名凭据错误时**不再试**第二种编码。
 - 面板刷新：一次刷新「状态 + 列表 + 打开的详情 + 已生成的计划」，因为只刷列表会让卡片继续显示过期字段。
-- 任务列表：`m=my&f=task`、`m=my&f=task&type=assignedTo`（13KB 空页）、
-  `m=task&f=browse&type=assignedTo`（153B 跳转）**三条路由均无数据** → 解析器无法用真实数据验证，暂不实现。
+- 任务列表：可用路由是 **`m=project&f=task[&projectID=N]`**（`m=my&f=task`、`m=task&f=browse`
+  都是空页/跳转）。但 8 个项目逐个探测**全部返回「暂时没有任务」** → 本实例没有任务行样本，
+  因此行解析只对合成样本测过并明确标注未验证；空态改用实测标记判定，形状不符时返回空数组。
+  面板「任务」页签显示真实原因，避免被读成解析失败。
 
 命名：暂定 `dsh-zentao-workbench`（可改）。位置：`~/Desktop/dsh/github/dsh-zentao-workbench`。

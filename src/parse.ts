@@ -174,6 +174,56 @@ export function parseBugList(html: string): BugRow[] {
   return rows
 }
 
+// --- project task list ------------------------------------------------------
+
+export interface TaskRow {
+  id: string
+  name: string
+  status: string
+  assignedTo: string
+  href: string
+}
+
+/** Measured marker on 10.6 when a project has no tasks. */
+export function taskListEmpty(html: string): boolean {
+  return html.includes('暂时没有任务')
+}
+
+/**
+ * `GET /index.php?m=project&f=task[&projectID=N]`
+ *
+ * VERIFICATION STATUS — read before trusting this:
+ *   · the route, its filters and the empty-state marker are measured on the
+ *     live instance (8 projects probed, every one empty);
+ *   · the instance has **no task rows at all**, so the row branch below has
+ *     never run against real markup. It mirrors the measured bug-list shape
+ *     (`taskIDList[]` checkbox in the first cell, `<a href=…taskID=N>` for the
+ *     name) and returns [] when that shape is absent, so a different layout
+ *     degrades to "no tasks" instead of inventing one.
+ */
+export function parseTaskList(html: string): TaskRow[] {
+  if (taskListEmpty(html)) return []
+  const table = html.match(/<table[^>]*\bid=(['"])taskList\1[^>]*>([\s\S]*?)<\/table>/)
+  const scope = table?.[2] ?? html
+  const rows: TaskRow[] = []
+  for (const row of scope.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)) {
+    const cells = [...(row[1] ?? '').matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1] ?? '')
+    if (cells.length < 4) continue
+    const id = (cells[0]?.match(/name=(['"])taskIDList\[\]\1[^>]*\bvalue=(['"])(\d+)\2/) ?? [])[3]
+      ?? (cells[0]?.match(/\bvalue=(['"])(\d+)\1/) ?? [])[2]
+    if (!id) continue
+    const anchor = cells.find((cell) => /taskID=\d+/.test(cell))?.match(/<a\b[^>]*\bhref=(['"])([^'"]+)\1[^>]*>([\s\S]*?)<\/a>/)
+    rows.push({
+      id,
+      name: decodeEntities(anchor?.[3] ?? cells[1] ?? ''),
+      status: decodeEntities(cells[2] ?? ''),
+      assignedTo: attr(cells[3] ?? '', 'title') || decodeEntities(cells[3] ?? ''),
+      href: anchor?.[2] ?? '',
+    })
+  }
+  return rows
+}
+
 // --- bug detail -------------------------------------------------------------
 
 export interface BugDetail {

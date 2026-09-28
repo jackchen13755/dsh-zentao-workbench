@@ -19,13 +19,14 @@ import { resolveBug, ZentaoWorkbench } from './zentao.js'
 const VALUE_FLAGS = new Set([
   'server', 'limit', 'only', 'build', 'history', 'resolution', 'reason',
   'detail', 'impact', 'comment', 'assigned-to', 'in-charged-by', 'cookie-jar', 'bridge-url',
-  'account', 'save-jar',
+  'account', 'save-jar', 'project',
 ])
 const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help', 'password-stdin'])
 
 const USAGE = `用法：
   zentao status   [--json]
   zentao bugs     [--limit 30] [--only all|open|resolved] [--refresh] [--json]
+  zentao tasks    [--project <id>] [--limit 30] [--json]
   zentao context  <bugID> [--build X] [--history 5] [--refresh] [--json]
   zentao login    --account A          （密码读 ZENTAO_PASSWORD，或 --password-stdin）
                   [--save-jar <path>]  （可选：把会话写成 0600 jar 供其它工具复用）
@@ -184,6 +185,23 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         }
         const status = await session.status(true)
         io.out(`${renderStatus(status)}\n`)
+        return 0
+      }
+
+      case 'tasks': {
+        const result = await workbench.myTasks({
+          projectID: flag(parsed, 'project'),
+          limit: Number(flag(parsed, 'limit') ?? 30),
+        })
+        if (asJson) {
+          io.out(`${JSON.stringify(result, null, 2)}\n`)
+          return 0
+        }
+        io.out(`任务（${result.tasks.length}/${result.total}，经「${result.via}」）${result.projectID !== undefined ? ` · 项目 ${result.projectID}` : ''}\n`)
+        for (const task of result.tasks) {
+          io.out(`  ${task.id}  ${task.name}  [${task.status || '-'}] ← ${task.assignedTo || '-'}\n`)
+        }
+        if (result.tasks.length === 0) io.out(`  ${result.note}\n`)
         return 0
       }
 

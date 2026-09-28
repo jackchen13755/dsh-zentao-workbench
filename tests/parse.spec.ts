@@ -5,10 +5,12 @@ import {
   parseBugView,
   parseHistories,
   parseResolveForm,
+  parseTaskList,
   resolveUid,
   sessionExpired,
+  taskListEmpty,
 } from '../src/parse.js'
-import { bugListPage, bugRow, bugViewPage, loginFormPage, loginRedirectPage, resolveFormPage } from './fixtures/pages.js'
+import { bugListPage, bugRow, bugViewPage, loginFormPage, loginRedirectPage, resolveFormPage, taskListPage, taskRow } from './fixtures/pages.js'
 
 describe('session fingerprints', () => {
   it('treats the redirect script and the login form as expiry', () => {
@@ -115,6 +117,30 @@ describe('parseResolveForm', () => {
     expect(form.defaults.resolvedBuild).toBe('build-7')
     expect(form.defaults.resolvedBuildText).toBe('build-7')
     expect(form.defaults.resolvedDate).toBe('2026-09-28 16:37:33')
+  })
+})
+
+describe('parseTaskList', () => {
+  it('reports the measured empty state instead of pretending to parse', () => {
+    const html = taskListPage()
+    expect(taskListEmpty(html)).toBe(true)
+    expect(parseTaskList(html)).toEqual([])
+  })
+
+  it('parses the row shape it mirrors from the bug list (unverified on real data)', () => {
+    const html = taskListPage([taskRow({ id: '9001', name: '接入报价模块', status: '进行中', assignedTo: 'dev.one' })])
+    expect(taskListEmpty(html)).toBe(false)
+    expect(parseTaskList(html)).toEqual([{
+      id: '9001',
+      name: '接入报价模块',
+      status: '进行中',
+      assignedTo: 'dev.one',
+      href: '/index.php?m=task&f=view&taskID=9001',
+    }])
+  })
+
+  it('degrades to no tasks when the layout is neither empty-marker nor known rows', () => {
+    expect(parseTaskList('<html><body><div>something else</div></body></html>')).toEqual([])
   })
 })
 

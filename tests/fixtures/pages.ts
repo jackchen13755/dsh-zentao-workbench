@@ -133,3 +133,27 @@ export function loginPageFixture(verifyRand = '1134243522'): string {
 export function loginFailureFixture(message = '登录失败，请检查您的用户名或密码是否填写正确。'): string {
   return `<html><meta charset='utf-8'/><script>alert('${message}');self.location='/index.php?m=user&f=login';</script></html>`
 }
+
+/**
+ * `m=project&f=task` — the empty branch is measured (eight projects probed);
+ * the row branch is a SYNTHETIC sample mirroring the bug-list shape, because
+ * this instance has no task rows anywhere to copy from.
+ */
+export function taskListPage(rows: string[] = []): string {
+  if (rows.length === 0) {
+    return `<html><head><title>【Demo】::任务列表 - 禅道</title></head><body>
+<div id="mainContent"><div class="table-empty-tip">暂时没有任务。您现在可以 <a href="#">建任务</a></div></div></body></html>`
+  }
+  return `<html><head><title>【Demo】::任务列表 - 禅道</title></head><body>
+<table class="table" id="taskList"><thead><tr><th>ID</th><th>任务名称</th><th>状态</th><th>指派给</th></tr></thead>
+<tbody>${rows.join('\n')}</tbody></table></body></html>`
+}
+
+export function taskRow(options: { id: string, name: string, status?: string, assignedTo?: string }): string {
+  return `<tr>
+  <td class="c-id"><div class="checkbox-primary"><input type='checkbox' name='taskIDList[]' value='${options.id}' /><label></label></div> ${options.id}</td>
+  <td><a href='/index.php?m=task&f=view&taskID=${options.id}'>${options.name}</a></td>
+  <td>${options.status ?? '未开始'}</td>
+  <td><span title="${options.assignedTo ?? 'dev.one'}">${options.assignedTo ?? 'Dev One'}</span></td>
+</tr>`
+}

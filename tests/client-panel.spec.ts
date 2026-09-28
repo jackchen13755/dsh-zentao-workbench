@@ -50,7 +50,7 @@ const flush = async (rounds = 6): Promise<void> => {
 function mount(
   rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>,
   handlePrompt: (text: string) => Promise<void> = async () => undefined,
-  options: { sidebar?: boolean } = {},
+  options: { sidebar?: boolean, variant?: 'sidebar' } = {},
 ) {
   // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
   // stub replaces global fetch instead of injecting an rpc service.
@@ -143,11 +143,18 @@ function mount(
 
   const module = definition!.factory(require)
   let component: ((props: unknown) => unknown) | undefined
+  // `options.variant: 'sidebar'` mounts the pane-body seat instead of the overlay.
+  let sidebarBody: ((props: unknown) => unknown) | undefined
   const ctx = {
     slots: {
       inject: (_name: string, callback: () => void) => callback(),
-      register: (_options: Record<string, unknown>, value: (props: unknown) => unknown) => {
-        component = value
+      register: (options: Record<string, unknown>, value: (props: unknown) => unknown) => {
+        // Keyed seats are the sidebar's; the un-keyed one is the floating overlay.
+        if (options.key !== undefined) {
+          if (options.name === 'sidebar.right.pane.tab') sidebarBody = value
+        } else {
+          component = value
+        }
         return () => undefined
       },
     },
@@ -190,7 +197,9 @@ function mount(
   const render = (): Element => {
     cursor = 0
     effectCursor = 0
-    const outer = component!({}) as Element
+    const target = options.variant === 'sidebar' ? sidebarBody : component
+    if (target === undefined) throw new Error(options.variant === 'sidebar' ? '没有注册侧边栏主体' : '没有注册面板组件')
+    const outer = target({}) as Element
     const tree = (outer.type as (props: unknown) => unknown)(outer.props) as Element
     // Run effects whose deps changed (first render always runs).
     effects.forEach((effect, index) => {
@@ -474,7 +483,7 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(calls.filter((endpoint) => endpoint === 'resolveSubmit')).toHaveLength(2)
   })
 
-  it('keeps its entry and reports how far the sidebar registration got', async () => {
+  it('reports how far the sidebar registration got, and steps aside once it hosts the panel', async () => {
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
       if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
         return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
@@ -486,13 +495,12 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     }
     const withSidebar = mount(rpc, undefined, { sidebar: true })
     let tree = await withSidebar.settle()
-    // The entry stays: it is the only entry that has ever been confirmed to work
-    // on a real host, so it is not hidden on an unverified assumption.
-    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeDefined()
-    // …and once opened, the panel says how far the sidebar registration got
-    // (the footer only exists while the panel is open).
-    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
-    tree = await withSidebar.settle()
+    // With the sidebar hosting the panel there is no right-edge tab (exactly how
+    // 源代码管理 behaves) — and the status line records why.
+    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeUndefined()
+    // The status line lives in the panel body; read it through the sidebar variant.
+    const inline = mount(rpc, undefined, { sidebar: true, variant: 'sidebar' })
+    tree = await inline.settle()
     const status = find(tree, (element) => element.props['data-zentao-sidebar-status'] === '1')
     expect(status).toBeDefined()
     expect(textOf(status).join(' ')).toContain('已注册')

@@ -100,7 +100,7 @@ describe('browser bundle', () => {
     const registered: Array<{ options: Record<string, unknown>, component: (props: unknown) => unknown }> = []
     const injectedSlots: string[] = []
     const injectedServices: string[][] = []
-    const tabTypes: Array<{ id: string, kind: string, title: () => string }> = []
+    const tabTypes: Array<{ id: string, kind: string, title: () => string, guide?: Array<Record<string, unknown>> }> = []
     let openedTab: unknown = null
 
     const ctx = {
@@ -116,7 +116,7 @@ describe('browser bundle', () => {
       // PROPERTIES, which is the shape the shipped docs describe.
       inject: (deps: string[], callback: (context: unknown) => unknown) => {
         injectedServices.push(deps)
-        const sidebarRightTabs = { register: (definition: { id: string, kind: string, title: () => string }) => { tabTypes.push(definition); return () => undefined } }
+        const sidebarRightTabs = { register: (definition: { id: string, kind: string, title: () => string, guide?: Array<Record<string, unknown>> }) => { tabTypes.push(definition); return () => undefined } }
         const sidebarRight = { openTab: (tab: unknown) => { openedTab = tab } }
         return callback({ sidebarRightTabs, sidebarRight })
       },
@@ -130,6 +130,15 @@ describe('browser bundle', () => {
     expect(tabTypes[0]!.id).toBe('dsh-zentao-workbench:panel')
     expect(tabTypes[0]!.kind).toBe('dsh-zentao-workbench:zentao')
     expect(tabTypes[0]!.title()).toBe('禅道')
+    // The sidebar ENTRY. Without `guide` the type and body exist but nothing is
+    // listed — the bug that kept 「禅道」 out of the sidebar while 「源代码管理」
+    // (which does register a guide) was there all along.
+    const guide = (tabTypes[0] as { guide?: Array<Record<string, unknown>> }).guide
+    expect(guide).toHaveLength(1)
+    expect(guide![0]!.id).toBe('zentao-workbench')
+    expect(guide![0]!.order).toBe(35)
+    expect((guide![0]!.title as () => string)()).toBe('禅道')
+    expect((guide![0]!.description as () => string)()).toContain('Bug')
 
     // …and the pane body is registered under that same key, in the inline variant.
     expect(injectedSlots).toContain('sidebar.right.pane.tab')
@@ -142,9 +151,9 @@ describe('browser bundle', () => {
     // it the tab has a body but no label.
     expect(injectedSlots).toContain('sidebar.right.pane.tab.title')
 
-    // Registering a type is not enough on a tab-based sidebar: something must
-    // open it, otherwise it never becomes visible. The plugin opens it itself.
-    expect(openedTab).toEqual({ type: 'dsh-zentao-workbench:panel' })
+    // The entry (guide) is what opens it — same as 源代码管理 — so nothing is
+    // opened automatically at load.
+    expect(openedTab).toBeNull()
 
     // The floating tab opens the sidebar tab rather than its own drawer.
     const overlay = registered.find((entry) => entry.options.id === 'zentao-workbench')

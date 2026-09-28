@@ -63,7 +63,20 @@ interface WorkspacesFace {
 }
 
 interface NativeTabType {
-  register(definition: { id: string, kind: string, title: () => string }): () => void
+  register(definition: {
+    id: string
+    kind: string
+    title: () => string
+    /**
+     * The sidebar ENTRY.
+     *
+     * Copied from the working neighbour (dsh-source-control): its own comment
+     * says it registers "the tab type, its body, and **the guide entry that opens
+     * it**". Without `guide` the type and body exist but nothing is listed in the
+     * sidebar — which is exactly why 「禅道」 never appeared while 「源代码管理」 did.
+     */
+    guide?: ReadonlyArray<{ id: string, order: number, title: () => string, description: () => string }>
+  }): () => void
 }
 
 interface SidebarController {
@@ -205,7 +218,20 @@ export function apply(ctx: ClientContext): void {
       }
       let dispose: (() => void) | undefined
       try {
-        dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
+        dispose = tabs.register({
+          id: SIDEBAR_TYPE,
+          kind: SIDEBAR_KIND,
+          title: () => '禅道',
+          guide: [
+            {
+              id: 'zentao-workbench',
+              // 35 keeps it right after 源代码管理 (30) in the sidebar's list.
+              order: 35,
+              title: () => '禅道',
+              description: () => '我的 Bug、按项目筛选、解决计划与一键修复',
+            },
+          ],
+        })
         sidebarState.registered = true
         sidebarReady = true
       } catch (problem) {
@@ -239,10 +265,9 @@ export function apply(ctx: ClientContext): void {
         right.openTab?.({ type: SIDEBAR_TYPE }, current)
         sidebarState.opened = true
       }
-      // Auto-open once, so the entry is visible without hunting for it.
-      try { openSidebarTab() } catch (problem) {
-        sidebarState.error = (problem as Error).message
-      }
+      // NOT auto-opened: the guide entry above is the entry point (that is how
+      // 源代码管理 behaves). `openSidebarTab` stays available for the fallback
+      // tab's click.
       return () => { openSidebarTab = undefined }
     }) as () => void
   }, 'dsh-zentao-workbench: open the sidebar tab')

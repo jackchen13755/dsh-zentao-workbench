@@ -562,6 +562,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
+  // Once the native sidebar really hosts us (guide entry registered + body in
+  // place), the right-edge tab is a second, redundant entry — same as
+  // dsh-source-control, which has none.
+  if (!inline && deps.hasSidebar?.() === true) return null
   if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true

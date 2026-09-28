@@ -277,6 +277,44 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(orders).toContain('severity_asc')
   })
 
+  it('renders a coloured severity badge per level', async () => {
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [
+          { id: '1', title: '致命单', severity: '主要', severityLevel: 1, pri: '3', type: 'x', assignedTo: 'dev', resolution: '', href: '/x' },
+          { id: '2', title: '次要单', severity: '次要', severityLevel: 4, pri: '3', type: 'x', assignedTo: 'dev', resolution: '', href: '/x' },
+        ], total: 2, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    const badges: Array<Record<string, unknown>> = []
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk)
+      if (node === null || typeof node !== 'object') return
+      const element = node as { type: unknown, props: Record<string, unknown>, children: unknown[] }
+      if (typeof element.type === 'function') return walk((element.type as (props: unknown) => unknown)(element.props))
+      if (element.props?.['data-zentao-severity'] !== undefined) badges.push(element.props.style as Record<string, unknown>)
+      element.children?.forEach(walk)
+    }
+    walk(tree)
+
+    expect(badges).toHaveLength(2)
+    for (const style of badges) {
+      expect(String(style.background)).toMatch(/^#[0-9a-f]{6}$/i)
+      expect(String(style.color)).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+    // The whole point of the request: different levels must look different.
+    expect(badges[0]!.background).not.toBe(badges[1]!.background)
+  })
+
   it('opens a detail card when a row is clicked', async () => {
     const calls: string[] = []
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {

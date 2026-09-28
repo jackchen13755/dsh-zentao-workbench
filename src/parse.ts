@@ -121,9 +121,30 @@ export function resolveUid(html: string): string {
 
 // --- my bug list ------------------------------------------------------------
 
+/**
+ * `data-severity='3'` inside the severity badge, when the markup carries it.
+ *
+ * Colouring by the numeric level instead of the label survives an instance that
+ * renames its levels (measured: this one shows 主要/次要 while the attribute
+ * still says 3/4).
+ */
+export function severityLevelOf(cellHtml: string): number | null {
+  const m = /data-severity=(['"])(\d+)\1/.exec(cellHtml)
+  if (m?.[2] === undefined) return null
+  const level = Number(m[2])
+  return Number.isFinite(level) ? level : null
+}
+
 export interface BugRow {
   id: string
   severity: string
+  /**
+   * Numeric severity from the badge's `data-severity` attribute (1..N), or null
+   * when the markup lacks it. Colouring by this instead of the label text keeps
+   * working when an instance renames its levels (measured: this one shows
+   * 主要/次要 while the attribute still says 3/4).
+   */
+  severityLevel: number | null
   pri: string
   type: string
   title: string
@@ -157,7 +178,8 @@ export function parseBugList(html: string): BugRow[] {
     const anchor = cells[4]?.match(/<a\b[^>]*\bhref=(['"])([^'"]+)\1[^>]*>([\s\S]*?)<\/a>/)
     rows.push({
       id,
-      severity: attr(cells[1] ?? '', 'title'),
+      severity: attr(cells[1] ?? '', 'title') || decodeEntities(cells[1] ?? ''),
+      severityLevel: severityLevelOf(cells[1] ?? ''),
       pri: attr(cells[2] ?? '', 'title') || decodeEntities(cells[2] ?? ''),
       type: attr(cells[3] ?? '', 'title') || decodeEntities(cells[3] ?? ''),
       title: decodeEntities(anchor?.[3] ?? cells[4] ?? ''),
@@ -247,6 +269,8 @@ export interface BugDetail {
   product: string
   status: string
   severity: string
+  /** Numeric rank behind the severity badge, when the page carries it. */
+  severityLevel: number | null
   pri: string
   assignedTo: string
   /** 解决版本 / 解决方案 as shown on the detail page — non-empty once resolved. */
@@ -290,6 +314,8 @@ export function parseBugView(html: string, bugID: string): BugDetail {
     product: parts.length >= 3 ? (parts[1] ?? '').trim() : '',
     status: currentStatus(html),
     severity: attr(html.match(/<span[^>]*class=(['"])[^'"]*label-severity[^'"]*\1[^>]*>/)?.[0] ?? '', 'title'),
+    // Same numeric rank the list badge carries, so both views colour alike.
+    severityLevel: severityLevelOf(html.match(/<span[^>]*class=(['"])[^'"]*label-severity[^'"]*\1[^>]*>[\s\S]{0,200}?<\/span>/)?.[0] ?? ''),
     pri: labelledField(html, '优先级'),
     assignedTo: assignee,
     resolvedBuild: labelledField(html, '解决版本'),

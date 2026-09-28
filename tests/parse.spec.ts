@@ -5,6 +5,7 @@ import {
   parseBugView,
   parseHistories,
   parseListTotal,
+  severityLevelOf,
   parseResolveForm,
   parseTaskList,
   resolveUid,
@@ -118,6 +119,22 @@ describe('parseResolveForm', () => {
     expect(form.defaults.resolvedBuild).toBe('build-7')
     expect(form.defaults.resolvedBuildText).toBe('build-7')
     expect(form.defaults.resolvedDate).toBe('2026-09-28 16:37:33')
+  })
+})
+
+describe('severity level', () => {
+  it('reads the numeric rank behind the badge', () => {
+    expect(severityLevelOf("<span class='label-severity-custom' title='主要' data-severity='3'>主要</span>")).toBe(3)
+    expect(severityLevelOf('data-severity="1"')).toBe(1)
+    expect(severityLevelOf('<span>主要</span>')).toBeNull()
+  })
+
+  it('carries the rank into every parsed row', () => {
+    const html = bugListPage([
+      bugRow({ id: '1', title: 'a', severity: '主要', severityLevel: 3 }),
+      bugRow({ id: '2', title: 'b', severity: '次要', severityLevel: 4 }),
+    ])
+    expect(parseBugList(html).map((row) => row.severityLevel)).toEqual([3, 4])
   })
 })
 

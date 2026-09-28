@@ -45,10 +45,12 @@
     load: (value) => { definition = value },
   }
 
+  // severityLevel mirrors the real markup's data-severity, so the harness shows
+  // the same colour scale the live instance will.
   const BUGS = [
-    { id: '55036', title: '查询条件location浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55036' },
-    { id: '55035', title: '查询条件category浮层问题', severity: '主要', pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55035' },
-    { id: '55004', title: '使用profile字段搜索时未清空右侧location信息', severity: '次要', pri: '2', type: '代码错误', assignedTo: 'dev.one', resolution: 'fixed', href: '/index.php?m=bug&f=view&bugID=55004' },
+    { id: '55036', title: '查询条件location浮层问题', severity: '主要', severityLevel: 3, pri: '3', type: '需求逻辑问题', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55036' },
+    { id: '55035', title: '支付回调偶发超时（示例：致命）', severity: '致命', severityLevel: 1, pri: '1', type: '代码错误', assignedTo: 'dev.one', resolution: '', href: '/index.php?m=bug&f=view&bugID=55035' },
+    { id: '55004', title: '使用profile字段搜索时未清空右侧location信息', severity: '次要', severityLevel: 4, pri: '2', type: '代码错误', assignedTo: 'dev.one', resolution: 'fixed', href: '/index.php?m=bug&f=view&bugID=55004' },
   ]
 
   // `?state=unauth` renders the not-logged-in panel (the four-strategy report),

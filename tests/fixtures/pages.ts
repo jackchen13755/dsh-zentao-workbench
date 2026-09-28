@@ -11,6 +11,8 @@ export function bugRow(options: {
   id: string
   title: string
   severity?: string
+  /** Numeric rank the real markup carries in data-severity. */
+  severityLevel?: number
   pri?: string
   type?: string
   openedBy?: string
@@ -20,7 +22,7 @@ export function bugRow(options: {
 }): string {
   return `<tr>
   <td class="c-id"><div class="checkbox-primary"><input type='checkbox' name='bugIDList[]' value='${options.id}' /><label></label></div> ${options.id}</td>
-  <td><span class='label-severity-custom' title='${options.severity ?? '主要'}' data-severity='3'>${options.severity ?? '主要'}</span></td>
+  <td><span class='label-severity-custom' title='${options.severity ?? '主要'}' data-severity='${String(options.severityLevel ?? 3)}'>${options.severity ?? '主要'}</span></td>
   <td><span class='label-pri label-pri-${options.pri ?? '3'}' title='${options.pri ?? '3'}'>${options.pri ?? '3'}</span></td>
   <td title="${options.type ?? '需求逻辑问题'}">${options.type ?? '需求逻辑问题'}</td>
   <td class='text-left nobr'><a href='/index.php?m=bug&f=view&bugID=${options.id}' style='color:red'>${options.title}</a></td>

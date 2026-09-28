@@ -9,6 +9,7 @@
  *    on its own is what made the old flow waste turns.
  */
 import { createElement, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { severityTone } from '../severity.js'
 
 import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 
@@ -35,6 +36,8 @@ interface BugsPayload { bugs: BugRow[], total: number, truncated?: boolean, via:
 interface BugRow {
   id: string
   severity: string
+  /** Numeric rank for the badge colour; null when the page did not carry it. */
+  severityLevel?: number | null
   pri: string
   type: string
   title: string
@@ -44,7 +47,7 @@ interface BugRow {
 }
 interface TaskRow { id: string, name: string, status: string, assignedTo: string, href: string }
 interface BugContext {
-  bug: { id: string, title: string, product: string, status: string, assignedTo: string, url: string }
+  bug: { id: string, title: string, product: string, status: string, assignedTo: string, url: string, severity?: string, severityLevel?: number | null }
   resolve: {
     uid: string
     fields: Array<{ name: string, label: string, required: boolean, limit?: number }>
@@ -74,6 +77,34 @@ interface Plan {
  * x=5). `right: 0` + `top: 50%` cannot drift, in any container, at any size.
  */
 const FAB_TEXT = '禅道'
+
+/**
+ * A severity badge: the level as a coloured chip.
+ *
+ * Colour comes from the row's numeric level (`data-severity`), falling back to
+ * the label — see `severityTone`. The label itself stays visible, because a
+ * colour alone is not a name.
+ */
+function severityBadge(label: string, level: number | null | undefined): ReactNode {
+  const text = label.trim()
+  if (text === '') return null
+  const tone = severityTone(level, text)
+  return createElement('span', {
+    'data-zentao-severity': String(level ?? ''),
+    title: `级别 ${text}（${tone.rank}）`,
+    style: {
+      background: tone.bg,
+      color: tone.fg,
+      borderRadius: 4,
+      padding: '0 5px',
+      fontSize: 11,
+      fontWeight: 600,
+      lineHeight: '16px',
+      display: 'inline-block',
+      verticalAlign: 'middle',
+    },
+  }, text)
+}
 
 const ROLE_PRESETS: Array<{ key: string, label: string, prompt: (reference: string) => string }> = [
   { key: 'dev', label: '开发', prompt: (ref) => `${ref}\n\n请按开发角度处理这个 Bug：先复现、定位根因、给出最小改动修复并自测，必要时补充用例。` },
@@ -520,13 +551,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'baseline' } },
         createElement('span', { style: { color: TOKEN.dim, fontSize: 11 } }, `#${bug.id}`),
         createElement('span', { style: { flex: 1 } }, bug.title)),
-      createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2 } }, `${bug.severity || '-'} / P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`)))))
+      createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
+        severityBadge(bug.severity || '', bug.severityLevel),
+        createElement('span', null, `P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`))))))
 
     if (tab === 'bugs' && selected !== null) {
       body.push(createElement('div', { key: 'detail', style: { borderTop: `1px solid ${TOKEN.line}`, padding: '10px 12px', maxHeight: 300, overflow: 'auto' } },
         createElement('div', { style: { fontWeight: 600 } }, `${selected.bug.id}｜${selected.bug.title}`),
-        createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0' } },
-          `产品 ${selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`),
+        createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+          severityBadge(selected.bug.severity || '', selected.bug.severityLevel),
+          createElement('span', null, `产品 ${selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`)),
         createElement('div', { style: { fontSize: 12 } },
           `必填：${selected.resolve.fields.filter((field) => field.required).map((field) => field.label).join('、')}`),
         createElement('div', { style: { fontSize: 12, color: TOKEN.dim, marginTop: 2 } },

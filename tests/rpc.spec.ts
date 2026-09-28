@@ -27,7 +27,9 @@ function world(options: { expired?: boolean, postOutcome?: 'ok' | 'alert' } = {}
       resolved = true
       return { body: '<div>ok</div>' }
     }
-    if (path === LIST) return bugListPage([bugRow({ id: '55036', title: '浮层问题' })])
+    // Prefix match: the real URL carries `type=assignedTo` (and optionally
+    // `orderBy`), and the exact query shape is part of the observed contract.
+    if (path.startsWith('/index.php?m=my&f=bug')) return bugListPage([bugRow({ id: '55036', title: '浮层问题' })])
     if (path.startsWith('/index.php?m=project&f=task')) return taskListPage()
     if (path === FORM) {
       return resolveFormPage({
@@ -95,6 +97,16 @@ describe('panel RPC channel', () => {
     expect(value.empty).toBe(true)
     // The note must say *why* it is empty, so nobody reads it as a parse failure.
     expect(value.note).toContain('没有任务数据')
+  })
+
+  it('rejects an unsupported sort with a message that lists the valid fields', async () => {
+    const { handle } = world()
+    const result = await handle('listBugs', { orderBy: 'id; drop table zt_bug' })
+    expect(result.ok).toBe(false)
+    const error = (result as { error: { code: string, message: string } }).error
+    expect(error.code).toBe('bad-request')
+    expect(error.message).toContain('不支持的排序')
+    expect(error.message).toContain('severity')
   })
 
   it('returns a structured failure — not a transport error — when the session is dead', async () => {

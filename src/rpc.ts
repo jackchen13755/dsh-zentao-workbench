@@ -16,7 +16,7 @@ import { refreshCookieJar } from './cookies.js'
 import { ZENTAO_FETCH_PATH } from './protocol.js'
 import type { ResolveArgs } from './resolve.js'
 import { ZenTaoAuthError, type SessionStatus, type ZenTaoSession } from './session.js'
-import { resolveBug, ZentaoWorkbench, type BugContext } from './zentao.js'
+import { normalizeOrderBy, resolveBug, ZentaoWorkbench, type BugContext } from './zentao.js'
 
 /** Absolute channel, matching the client's `rpc.call('/zentao', …)`. */
 export const ZENTAO_RPC_CHANNEL = '/zentao'
@@ -91,10 +91,22 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
         }
 
         case 'listBugs': {
+          // Validate the sort *here* rather than catching everything around the
+          // fetch: a blanket catch would turn an authentication failure into
+          // "bad-request" and hide the real verdict from the panel.
+          let orderBy: string | undefined
+          if (typeof body.orderBy === 'string' && body.orderBy.trim() !== '') {
+            try {
+              orderBy = normalizeOrderBy(body.orderBy)
+            } catch (error) {
+              return fail('bad-request', (error as Error).message)
+            }
+          }
           const result = await workbench.myBugs({
             limit: numberOr(body.limit, 30),
             only: (body.only === 'open' || body.only === 'resolved' ? body.only : 'all') as 'all' | 'open' | 'resolved',
             refresh: body.refresh === true,
+            ...(orderBy === undefined ? {} : { orderBy }),
           })
           return { ok: true, value: result }
         }

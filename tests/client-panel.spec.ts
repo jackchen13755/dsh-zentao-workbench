@@ -252,6 +252,31 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(textOf(tree).join(' ')).toContain('没有任务数据')
   })
 
+  it('re-queries with the chosen order when the sort control changes', async () => {
+    const orders: unknown[] = []
+    const rpc = async (endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown }> => {
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        orders.push((payload as { orderBy?: unknown }).orderBy)
+        return { ok: true, value: { bugs: [{ id: '55036', title: '浮层问题', severity: '主要', pri: '3', type: 'x', assignedTo: 'dev.one', resolution: '', href: '/x' }], total: 1, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+    expect(orders[0]).toBe('id_desc')
+
+    const sort = find(tree, (element) => element.props['data-zentao-sort'] === '1')!
+    expect(sort).toBeDefined()
+    ;(sort.props.onChange as (event: unknown) => void)({ target: { value: 'severity_asc' } })
+    await settle()
+    expect(orders).toContain('severity_asc')
+  })
+
   it('opens a detail card when a row is clicked', async () => {
     const calls: string[] = []
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {

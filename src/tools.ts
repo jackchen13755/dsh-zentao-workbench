@@ -105,6 +105,7 @@ export function createTools(deps: ToolDeps): unknown[] {
       parameters: {
         limit: { type: 'number', description: '返回条数上限，默认 30，最大 200' },
         only: { type: 'string', enum: ['all', 'open', 'resolved'], description: '筛选：all（默认）/ open 仅未解决 / resolved 仅已解决（依据列表页的「解决/方案」两列）' },
+        orderBy: { type: 'string', description: '排序，形如 <字段>_<asc|desc>。常用：id_desc（默认，最新在前）、openedDate_desc（按创建时间）、severity_asc（级别高→低）、pri_asc（优先级高→低）；可用字段 id/severity/pri/openedDate/lastEditedDate/assignedTo/status/resolution' },
         refresh: { type: 'boolean', description: '绕过 60 秒缓存' },
       },
       output: {
@@ -112,10 +113,10 @@ export function createTools(deps: ToolDeps): unknown[] {
         render: (_args, value) => text(String((value as { text?: string }).text ?? '')),
       },
       async execute(args): Promise<{ text: string }> {
-        const a = args as { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean }
+        const a = args as { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string }
         try {
           const result = await workbench.myBugs(a)
-          const lines = [`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}`]
+          const lines = [`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}`]
           for (const bug of result.bugs) {
             lines.push(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← 指派 ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}`)
           }

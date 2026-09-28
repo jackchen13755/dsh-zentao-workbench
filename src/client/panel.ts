@@ -132,6 +132,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [config, setConfig] = useState<Config | null>(null)
   const [bugs, setBugs] = useState<BugRow[]>([])
   const [only, setOnly] = useState<'all' | 'open'>('open')
+  /** Server-side sort; values are whitelisted host-side (they reach SQL). */
+  const [orderBy, setOrderBy] = useState('id_desc')
   const [intervalMin, setIntervalMin] = useState(5)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -169,7 +171,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const refreshBugs = useCallback(async (force = false) => {
     setBusy('bugs')
     try {
-      const value = await call('listBugs', { limit: 30, only, refresh: force }) as BugsPayload
+      const value = await call('listBugs', { limit: 30, only, orderBy, refresh: force }) as BugsPayload
       setBugs(value.bugs)
       setBugsTotal({ total: value.total, truncated: value.truncated === true })
       setError('')
@@ -178,7 +180,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     } finally {
       setBusy('')
     }
-  }, [call, only])
+  }, [call, only, orderBy])
 
   /**
    * One refresh that covers everything currently visible: the session status,
@@ -193,7 +195,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       const next = { ...(status.config ?? status), probes: status.probes ?? status.config?.probes ?? [] } as Config
       setConfig(next)
       if (next.authenticated) {
-        const listed = await call('listBugs', { limit: 30, only, refresh: force }) as { bugs: BugRow[] }
+        const listed = await call('listBugs', { limit: 30, only, orderBy, refresh: force }) as BugsPayload
         setBugs(listed.bugs)
         if (tab === 'tasks') {
           const taskValue = await call('listTasks', { limit: 30 }) as { tasks: TaskRow[], note: string }
@@ -215,7 +217,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     } finally {
       setBusy('')
     }
-  }, [call, only, tab, selected, plan])
+  }, [call, only, orderBy, tab, selected, plan])
 
   const refreshTasks = useCallback(async () => {
     setBusy('tasks')
@@ -232,6 +234,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   }, [call])
 
   useEffect(() => { void refreshStatus(true) }, [refreshStatus])
+
+  // Changing the filter or the sort must re-read: the loading effect below only
+  // runs its initial fetch once (`lastUpdated` is already set afterwards), so
+  // without this the list kept showing the previous order — caught by the
+  // sort behaviour test.
+  useEffect(() => {
+    if (!open || config?.authenticated !== true) return undefined
+    void refreshBugs(true)
+    return undefined
+  }, [open, config?.authenticated, only, orderBy, refreshBugs])
 
   useEffect(() => {
     if (!open || config?.authenticated !== true) return undefined
@@ -452,10 +464,25 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
     }
 
-    if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
-      createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1 } },
+    if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
+      createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1, minWidth: 88 } },
         createElement('option', { value: 'open' }, '未解决'),
         createElement('option', { value: 'all' }, '全部')),
+      createElement('select', {
+        'data-zentao-sort': '1',
+        title: '排序（服务端排序，值经宿主白名单校验）',
+        value: orderBy,
+        onChange: (event: { target: { value: string } }) => setOrderBy(event.target.value),
+        style: { flex: 1, minWidth: 132 },
+      },
+        createElement('option', { value: 'id_desc' }, 'ID（新→旧）'),
+        createElement('option', { value: 'id_asc' }, 'ID（旧→新）'),
+        createElement('option', { value: 'openedDate_desc' }, '创建时间（新→旧）'),
+        createElement('option', { value: 'openedDate_asc' }, '创建时间（旧→新）'),
+        createElement('option', { value: 'severity_asc' }, '级别（高→低）'),
+        createElement('option', { value: 'severity_desc' }, '级别（低→高）'),
+        createElement('option', { value: 'pri_asc' }, '优先级（高→低）'),
+        createElement('option', { value: 'pri_desc' }, '优先级（低→高）')),
       createElement('select', { value: String(intervalMin), onChange: (event: { target: { value: string } }) => setIntervalMin(Number(event.target.value)), title: '自动刷新间隔' },
         createElement('option', { value: '1' }, '1 分钟'),
         createElement('option', { value: '5' }, '5 分钟'),
@@ -507,10 +534,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         ...(selected.histories.length > 0
           ? [createElement('div', { key: 'hist', style: { marginTop: 6, fontSize: 12, color: TOKEN.dim } }, ...selected.histories.map((line, index) => createElement('div', { key: index }, `· ${line}`)))]
           : []),
-        createElement('div', { style: { display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' } },
+        createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } },
+          '要解决这条 Bug：点「① 预览解决计划」看清将要提交的字段，再点「② 确认并提交解决」（会二次确认）。'),
+        createElement('div', { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
           createElement('button', { type: 'button', draggable: true, style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
           createElement('button', { type: 'button', onClick: () => void insert(referenceOf(selected.bug), '引用'), style: { cursor: 'pointer' } }, '复制引用'),
-          createElement('button', { type: 'button', 'data-zentao-action': 'plan', onClick: () => void previewPlan(selected.bug.id), style: { cursor: 'pointer' } }, busy === 'plan' ? '生成中…' : '预览解决计划'),
+          createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'plan',
+            title: '第 1 步：按表单默认值生成解决计划（只读，不会提交）',
+            onClick: () => void previewPlan(selected.bug.id),
+            style: { cursor: 'pointer', fontWeight: 600, borderColor: TOKEN.accent, color: TOKEN.accent },
+          }, busy === 'plan' ? '生成中…' : '① 预览解决计划'),
           ...ROLE_PRESETS.map((role) => createElement('button', {
             key: role.key,
             type: 'button',
@@ -555,7 +590,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                   setBusy('')
                 }
               },
-            }, busy === 'submit' ? '提交中…' : '确认并提交解决'))))
+            }, busy === 'submit' ? '提交中…' : '② 确认并提交解决'))))
       }
     }
   }

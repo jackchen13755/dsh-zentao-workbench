@@ -19,8 +19,38 @@ import type { StrategyId, ZenTaoSession } from './session.js'
 
 export { RESOLVE_FIELD_RULES } from './fields.js'
 
+/**
+ * Sortable columns, verified against the live list page.
+ *
+ * The header links themselves offer `id/severity/pri/type/title/openedBy/
+ * assignedTo/resolvedBy/resolution`; "time" is not a header but `openedDate` is
+ * honoured by the server (measured: `openedDate_asc` returns the ascending
+ * order, not the default `id_desc`), and `severity_asc` really does put the
+ * more severe rows first.
+ *
+ * This list is a **whitelist on purpose**: the value lands in the server's SQL
+ * ORDER BY clause, so an unchecked string would be an injection point.
+ */
+export const BUG_ORDER_FIELDS = ['id', 'severity', 'pri', 'openedDate', 'lastEditedDate', 'assignedTo', 'status', 'resolution'] as const
+export type BugOrderField = (typeof BUG_ORDER_FIELDS)[number]
+export type BugOrderBy = `${BugOrderField}_${'asc' | 'desc'}`
+
+/** `severity_asc` / `id_desc` … — throws on anything outside the whitelist. */
+export function normalizeOrderBy(value: string | undefined): BugOrderBy | '' {
+  const raw = (value ?? '').trim()
+  if (raw === '') return ''
+  const match = /^([a-zA-Z]+)_(asc|desc)$/.exec(raw)
+  const field = match?.[1] as BugOrderField | undefined
+  if (field === undefined || !(BUG_ORDER_FIELDS as readonly string[]).includes(field)) {
+    throw new Error(`不支持的排序「${raw}」；可用字段：${BUG_ORDER_FIELDS.join(' / ')}，方向 _asc / _desc`)
+  }
+  return `${field}_${match![2] as 'asc' | 'desc'}`
+}
+
 export interface MyBugsResult {
   bugs: BugRow[]
+  /** The order actually requested (`id_desc` by default), echoed for the caller. */
+  orderBy: BugOrderBy | ''
   /** The pager's own count when the page exposes it, else the rows on this page. */
   total: number
   /** True when this page holds fewer rows than `total` (caller should not read it as "everything"). */
@@ -78,7 +108,7 @@ export class ZentaoWorkbench {
   private readonly listTtlMs: number
   /** The full dropdown lives here, never in a returned context. */
   private readonly bugs = new Map<string, { at: number, value: BugContext, buildOptions: SelectOption[] }>()
-  private list: { at: number, value: MyBugsResult } | null = null
+  private list: { at: number, orderBy: BugOrderBy | '', value: MyBugsResult } | null = null
 
   constructor(readonly session: ZenTaoSession, options: WorkbenchOptions = {}) {
     this.bugTtlMs = options.bugTtlMs ?? 10 * 60_000
@@ -110,19 +140,32 @@ export class ZentaoWorkbench {
     this.list = null
   }
 
-  async myBugs(options: { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean } = {}): Promise<MyBugsResult> {
+  async myBugs(options: { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string } = {}): Promise<MyBugsResult> {
     const limit = Math.min(Math.max(options.limit ?? 30, 1), 200)
-    const cached = this.list !== null && !options.refresh && Date.now() - this.list.at < this.listTtlMs
+    const wanted = normalizeOrderBy(options.orderBy)
+    // The cache is keyed by the requested order too: returning an id_desc page
+    // for a severity_asc request would be a silent lie.
+    const cached = this.list !== null && !options.refresh && this.list.orderBy === wanted && Date.now() - this.list.at < this.listTtlMs
     if (!cached) {
-      const page = await this.session.get('/index.php?m=my&f=bug')
+      const orderBy = wanted
+      // Parameter order matters on this instance: `type=assignedTo` must come
+      // before `orderBy`, and a bare `orderBy` (without `type`) returns an EMPTY
+      // list. Measured:
+      //   m=my&f=bug                                  → 29 rows
+      //   m=my&f=bug&orderBy=id_desc                  → 0 rows
+      //   m=my&f=bug&type=assignedTo&orderBy=id_desc  → 29 rows
+      // This mirrors the URL the page's own pager generates.
+      const page = await this.session.get(`/index.php?m=my&f=bug&type=assignedTo${orderBy === '' ? '' : `&orderBy=${orderBy}`}`)
       const bugs = parseBugList(page.body)
       const pagerTotal = parseListTotal(page.body)
       this.list = {
         at: Date.now(),
+        orderBy,
         value: {
           bugs,
           total: pagerTotal ?? bugs.length,
           truncated: pagerTotal !== null && pagerTotal > bugs.length,
+          orderBy,
           via: page.strategy,
           url: page.url,
           fetchedAt: new Date().toISOString(),

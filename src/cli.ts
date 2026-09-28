@@ -21,13 +21,14 @@ import { resolveBug, ZentaoWorkbench } from './zentao.js'
 const VALUE_FLAGS = new Set([
   'server', 'limit', 'only', 'build', 'history', 'resolution', 'reason',
   'detail', 'impact', 'comment', 'assigned-to', 'in-charged-by', 'cookie-jar', 'bridge-url',
-  'account', 'save-jar', 'project', 'host-url',
+  'account', 'save-jar', 'project', 'host-url', 'order-by',
 ])
 const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help', 'password-stdin'])
 
 const USAGE = `用法：
   zentao status   [--json]
   zentao bugs     [--limit 30] [--only all|open|resolved] [--refresh] [--json]
+                  [--order-by id_desc|openedDate_desc|severity_asc|pri_asc|…]
   zentao tasks    [--project <id>] [--limit 30] [--json]
   zentao context  <bugID> [--build X] [--history 5] [--refresh] [--json]
   zentao doctor   [--host-url http://127.0.0.1:19387]
@@ -149,12 +150,13 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           limit: Number(flag(parsed, 'limit') ?? 30),
           only: (flag(parsed, 'only') ?? 'all') as 'all' | 'open' | 'resolved',
           refresh: parsed.flags.get('refresh') === true,
+          orderBy: flag(parsed, 'order-by'),
         })
         if (asJson) {
           io.out(`${JSON.stringify(result, null, 2)}\n`)
           return 0
         }
-        io.out(`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}\n`)
+        io.out(`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}\n`)
         if (result.truncated) io.out(`  注意：本页只有 ${result.bugs.length} 条，实例共 ${result.total} 条；加大 --limit 或用面板查看\n`)
         for (const bug of result.bugs) {
           io.out(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}\n`)

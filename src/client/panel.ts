@@ -875,8 +875,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         // Local filter over the page already fetched: the list endpoint rejects
         // server-side keyword params (measured: keywords=/title= → 0 rows).
         placeholder: '搜索 单号 / 标题 / 类型 / 级别 / 指派给…',
-        value: search,
-        onChange: (event: { target: { value: string } }) => setSearch(event.target.value),
+        // 容器已经有边框与底色，输入框自身不再画一遍（否则双边框）。
+        style: { flex: 1, minWidth: 0, height: '100%', border: 'none', background: 'transparent', color: 'inherit', fontSize: 13, outline: 'none' },        onChange: (event: { target: { value: string } }) => setSearch(event.target.value),
         // Esc is the reflex for "get me out of this filter" — it clears, not blurs.
         onKeyDown: (event: { key?: string }) => { if (event.key === 'Escape') setSearch('') },
       }),
@@ -1026,7 +1026,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: { position: 'sticky', top: 0, zIndex: 2, padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}`,
                  background: TOKEN.bg } },
         createElement('div', { className: 'zt-actions' },
-          createElement('button', { type: 'button', draggable: true, style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
+          createElement('button', { type: 'button', draggable: true, style: { ...BTN, cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
           createElement('button', { type: 'button', style: BTN, onClick: () => void insert(referenceOf(selected.bug), '引用') }, '复制引用'),
           createElement('button', {
             type: 'button',
@@ -1202,16 +1202,22 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: checked.includes(bug.id) ? ROW_ON : ROW,
       },
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-        createElement('input', {
-          type: 'checkbox',
-          'data-zentao-check': bug.id,
+        // Wrapped in a padded hit area: users reported the bare checkbox was hard
+        // to hit and clicks landed on the row (opening the detail) instead.
+        createElement('span', {
+          'data-zentao-checkbox-hit': bug.id,
           title: '勾选以批量处理',
-          checked: checked.includes(bug.id),
-          // The row itself opens the detail; ticking must not do that too.
-          onClick: (event: { stopPropagation?: () => void }) => event.stopPropagation?.(),
-          onChange: () => toggleChecked(bug.id),
-          style: { cursor: 'pointer', margin: 0 },
-        }),
+          onClick: (event: { stopPropagation?: () => void }) => { event.stopPropagation?.(); toggleChecked(bug.id) },
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, marginLeft: -5, borderRadius: 6, cursor: 'pointer', flex: '0 0 auto' },
+        },
+          createElement('input', {
+            type: 'checkbox',
+            'data-zentao-check': bug.id,
+            checked: checked.includes(bug.id),
+            // The wrapper handles the click; this keeps keyboard/space working.
+            onChange: () => toggleChecked(bug.id),
+            style: { cursor: 'pointer', margin: 0, width: 15, height: 15, pointerEvents: 'none' },
+          })),
         createElement('span', {
           className: bug.resolution === '' ? 'zt-dot zt-dot-open' : 'zt-dot zt-dot-done',
           title: bug.resolution === '' ? '未解决' : `已解决（${bug.resolution}）`,

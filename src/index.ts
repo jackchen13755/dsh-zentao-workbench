@@ -9,7 +9,8 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createZentaoRpcHandler, ZENTAO_RPC_CHANNEL } from './rpc.js'
+import { ZENTAO_FETCH_PATH } from './protocol.js'
+import { createZentaoFetchRoute, createZentaoRpcHandler, ZENTAO_RPC_CHANNEL } from './rpc.js'
 
 type Disposer = void | (() => void)
 
@@ -35,9 +36,18 @@ interface MinimalContext {
   get?(name: string): unknown
 }
 
+interface FetchRouteRegistry {
+  register(route: unknown): () => void
+}
+
 interface ConnectionService {
   rpc?: ConnectionRpcFace
+  /** Exact Fetch routes under the shared `/api` prefix (the desktop transport). */
+  fetch?: FetchRouteRegistry
 }
+
+/** Human-readable outcome of the panel-transport registration, for `zentao doctor`. */
+export interface PanelTransportState { state: string }
 
 export const name = 'dsh-zentao-workbench'
 
@@ -92,6 +102,9 @@ import { ZentaoWorkbench } from './zentao.js'
 
 export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
   ctx.effect(() => {
+    // Declared outside the inject callback so a tool can report it even when the
+    // registration never happened (the failure mode that cost us two rounds).
+    const panelTransport: PanelTransportState = { state: '未注册（尚未尝试）' }
     const session = new ZenTaoSession({
       server: pluginConfig?.server,
       bridgeUrl: pluginConfig?.bridgeUrl,
@@ -102,7 +115,7 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
       listTtlMs: pluginConfig?.listTtlMs,
     })
     const disposers: Array<() => void> = []
-    for (const tool of createTools({ session, workbench })) {
+    for (const tool of createTools({ session, workbench, panelTransport: () => panelTransport.state })) {
       disposers.push(ctx.tools.register(tool))
       ctx.logger?.info?.(`[dsh-zentao-workbench] registered tool: ${(tool as { name?: string }).name ?? '?'}`)
     }
@@ -112,8 +125,9 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
     // useful in a TUI/headless profile that has no connection service at all.
     const registerPanelTransport = (scoped: MinimalContext & { connection?: ConnectionService }): Disposer => {
       const connection = scoped.connection
-      if (connection?.rpc === undefined) {
-        scoped.logger?.warn?.('[dsh-zentao-workbench] connection service exposes no rpc — panel transport unavailable, tools only')
+      if (connection === undefined) {
+        panelTransport.state = '未注册：apply 时看不到 connection 服务'
+        scoped.logger?.warn?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
         return
       }
       const handler = createZentaoRpcHandler({
@@ -122,22 +136,53 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
         exportScript: pluginConfig?.cookieExportScript ?? defaultExportScript(),
         exportJarPath: pluginConfig?.cookieJarPath,
       })
-      const dispose = connection.rpc.handle(ZENTAO_RPC_CHANNEL, (endpoint, payload, signal) => handler(endpoint, payload, signal))
-      scoped.effect(() => () => {
-        void Promise.resolve(dispose()).catch(() => undefined)
-      })
-      scoped.logger?.info?.(`[dsh-zentao-workbench] rpc channel ${ZENTAO_RPC_CHANNEL} registered (panel transport)`)
+      const call = (endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> => handler(endpoint, payload, signal)
+
+      // Preferred: an exact Fetch route under the shared `/api` prefix. Measured
+      // to be the only transport this desktop Host actually mounts.
+      if (connection.fetch?.register !== undefined) {
+        try {
+          const dispose = connection.fetch.register(createZentaoFetchRoute(call))
+          scoped.effect(() => () => {
+            void Promise.resolve(dispose()).catch(() => undefined)
+          })
+          panelTransport.state = `已注册：POST ${ZENTAO_FETCH_PATH}（exact fetch route）`
+          scoped.logger?.info?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
+          return
+        } catch (error) {
+          panelTransport.state = `fetch 路由注册被拒：${(error as Error).message}`
+          scoped.logger?.warn?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
+        }
+      } else {
+        panelTransport.state = 'connection 未提供 fetch 注册表'
+      }
+
+      // Fallback: a private RPC channel. Kept because other Host shapes mount
+      // these; on this desktop build it is expected to 405.
+      if (connection.rpc?.handle !== undefined) {
+        try {
+          const dispose = connection.rpc.handle(ZENTAO_RPC_CHANNEL, (endpoint, payload, signal) => call(endpoint, payload, signal))
+          scoped.effect(() => () => {
+            void Promise.resolve(dispose()).catch(() => undefined)
+          })
+          panelTransport.state += `；已回退注册私有通道 ${ZENTAO_RPC_CHANNEL}（本宿主可能不挂载）`
+          scoped.logger?.info?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
+          return
+        } catch (error) {
+          panelTransport.state += `；私有通道注册也失败：${(error as Error).message}`
+        }
+      }
+      scoped.logger?.warn?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
     }
 
     if (ctx.inject !== undefined) {
       ctx.inject(['connection'], registerPanelTransport)
     } else {
-      // Last resort for a host whose Context lacks `inject`: never let a failed
-      // lookup take the tools down with it.
       try {
         registerPanelTransport(ctx as MinimalContext & { connection?: ConnectionService })
       } catch (error) {
-        ctx.logger?.warn?.(`[dsh-zentao-workbench] panel transport not registered: ${(error as Error).message}`)
+        panelTransport.state = `回退注册抛错：${(error as Error).message}`
+        ctx.logger?.warn?.(`[dsh-zentao-workbench] ${panelTransport.state}`)
       }
     }
 

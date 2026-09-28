@@ -1,6 +1,5 @@
 /**
- * Bundle the compiled browser half into the single file the profile's
- * client-modules service serves.
+ * Bundle the compiled browser half into the single file the profile serves.
  *
  * The profile evaluates a client bundle as
  *
@@ -8,10 +7,13 @@
  *
  * so the file must be one CommonJS module graph with the product's own packages
  * (`react`, the slot service) left as `require(...)` calls the loader resolves.
- * The compiled output is a handful of sibling CJS modules, so instead of pulling
- * in a bundler this script inlines the relative requires by hand — the graph has
- * no cycles and no dynamic requires, which is all that needs to hold.
+ * The compiled output is a handful of sibling/descendant CJS modules, so instead
+ * of pulling in a bundler this script inlines relative requires by hand — the
+ * graph has no cycles and no dynamic requires, which is all that needs to hold.
  * (Same approach as dsh-source-control: zero build dependencies.)
+ *
+ * It resolves specifiers per importing module, so `src/protocol.ts` shared with
+ * the host half can live above `src/client/`.
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,27 +23,58 @@ const PLUGIN_ID = 'dsh-zentao-workbench'
 /** tsc output directory for the browser half. */
 const BUILD_DIR = 'lib/.client-build'
 /** Entry module, relative to the build directory. */
-const ENTRY = './index.js'
+const ENTRY = 'client/index.js'
 /** Final bundle path. */
 const OUT_FILE = 'lib/client.js'
 
-const modules = readdirSync(BUILD_DIR).filter((name) => name.endsWith('.js')).sort()
-const ids = new Map(modules.map((name, index) => [`./${name}`, index]))
+/** Every compiled module, as paths relative to BUILD_DIR ('client/panel.js'). */
+function collect(dir, prefix = '') {
+  const found = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    const relative = prefix === '' ? entry : `${prefix}/${entry}`
+    if (statIsDirectory(full)) found.push(...collect(full, relative))
+    else if (relative.endsWith('.js')) found.push(relative)
+  }
+  return found
+}
+function statIsDirectory(path) {
+  try {
+    readdirSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const modules = collect(BUILD_DIR).sort()
+const ids = new Map(modules.map((name, index) => [name, index]))
 if (!ids.has(ENTRY)) throw new Error(`bundle-client: ${ENTRY} not found in ${BUILD_DIR}`)
 
+/** Resolve `./x.js` from the importing module's own directory to a module slot. */
+function resolveRelative(fromPath, specifier) {
+  const segments = fromPath.split('/').slice(0, -1)
+  for (const part of specifier.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') segments.pop()
+    else segments.push(part)
+  }
+  const target = segments.join('/')
+  return ids.get(target.endsWith('.js') ? target : `${target}.js`)
+}
+
 /** Rewrite relative requires to module-slot lookups; everything else stays the loader's. */
-function transform(source) {
+function transform(source, fromPath) {
   return source.replace(/require\((["'])(\.[^"']*)\1\)/g, (match, _quote, specifier) => {
-    const resolved = specifier.endsWith('.js') ? specifier : `${specifier}.js`
-    const id = ids.get(resolved.startsWith('./') ? resolved : `./${resolved}`)
-    if (id === undefined) throw new Error(`bundle-client: unresolved relative require ${specifier}`)
+    const id = resolveRelative(fromPath, specifier)
+    if (id === undefined) throw new Error(`bundle-client: unresolved relative require ${specifier} (from ${fromPath})`)
     return `__require(${id})`
   })
 }
 
 const factories = modules
   .map((name, index) => {
-    const code = transform(readFileSync(join(BUILD_DIR, name), 'utf8'))
+    const code = transform(readFileSync(join(BUILD_DIR, name), 'utf8'), name)
     return [
       `__factories[${index}] = function () {`,
       'var module = { exports: {} }; var exports = module.exports;',

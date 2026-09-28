@@ -10,10 +10,14 @@
  */
 import { createElement, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-type RpcResult = { ok: true, value: unknown } | { ok: false, error: { code: string, message: string } }
+import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 
 export interface PanelDeps {
-  rpc: { call(channel: string, endpoint: string, payload?: unknown): Promise<RpcResult> }
+  /**
+   * One panel call. Implemented by the browser half as a POST to
+   * {@link ZENTAO_FETCH_PATH} — the transport this Host actually mounts.
+   */
+  call(endpoint: string, payload?: unknown): Promise<RpcResult>
   /** Opens a conversation with the text (the "处理" button). */
   handlePrompt(text: string): Promise<void>
 }
@@ -144,10 +148,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [password, setPassword] = useState('')
 
   const call = useCallback(async (endpoint: string, payload?: unknown): Promise<unknown> => {
-    const result = await deps.rpc.call('/zentao', endpoint, payload)
+    const result = await deps.call(endpoint, payload)
     if (!result.ok) throw new Error(result.error.message)
     return result.value
-  }, [deps.rpc])
+  }, [deps.call])
 
   const refreshStatus = useCallback(async (force = true) => {
     setBusy('status')

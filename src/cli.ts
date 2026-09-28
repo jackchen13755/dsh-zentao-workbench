@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { ZENTAO_FETCH_PATH } from './protocol.js'
 import { ZENTAO_RPC_CHANNEL } from './rpc.js'
 import { renderPlan } from './resolve.js'
 import { renderStatus, ZenTaoAuthError, ZenTaoSession } from './session.js'
@@ -164,30 +165,43 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
 
       case 'doctor': {
         const hostUrl = (flag(parsed, 'host-url') ?? 'http://127.0.0.1:19387').replace(/\/+$/, '')
-        const route = `${hostUrl}${ZENTAO_RPC_CHANNEL}/sessionStatus`
-        io.out(`面板通道自检\n  探测 ${route}\n`)
-        let verdict: string
-        try {
-          const response = await fetch(route, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ type: 'client-request', rpcId: 'doctor', method: 'sessionStatus', payload: {} }),
-            signal: AbortSignal.timeout(8000),
-          })
-          if (response.status === 401 || response.status === 403) {
-            verdict = `HTTP ${response.status} —— 通道路由已注册（401/403 是浏览器鉴权要求，属正常）✓`
-          } else if (response.status === 404 || response.status === 405) {
-            verdict = `HTTP ${response.status} —— **通道路由没有注册**：宿主里这个插件的 connection 注册没成功（或宿主未重启加载新代码）。`
-          } else {
-            verdict = `HTTP ${response.status} —— 非预期状态码，请人工看一眼响应体。`
+        const probe = async (path: string, body: unknown): Promise<number | string> => {
+          try {
+            const response = await fetch(`${hostUrl}${path}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(8000),
+            })
+            return response.status
+          } catch (error) {
+            return `连不上（${(error as Error).message}）`
           }
-        } catch (error) {
-          verdict = `连不上宿主（${(error as Error).message}）—— 确认 DSH 在运行，或用 --host-url 指对端口。`
         }
-        io.out(`  ${verdict}\n\n`)
+
+        io.out(`面板通道自检\n`)
+        const fetchStatus = await probe(ZENTAO_FETCH_PATH, { endpoint: 'sessionStatus', payload: {} })
+        const legacyStatus = await probe(`${ZENTAO_RPC_CHANNEL}/sessionStatus`, {
+          type: 'client-request', rpcId: 'doctor', method: 'sessionStatus', payload: {},
+        })
+        io.out(`  POST ${ZENTAO_FETCH_PATH.padEnd(14)} → ${fetchStatus}\n`)
+        io.out(`  POST ${(ZENTAO_RPC_CHANNEL + '/sessionStatus').padEnd(14)} → ${legacyStatus}（旧私有通道，本宿主预期 405）\n\n`)
+
+        // Careful: 401/403 under /api does NOT prove our route exists — the
+        // shared prefix runs its Host/Origin fence and browser auth *before*
+        // dispatch, so any path under it answers 401 when unauthenticated.
+        // Only a 404/405 is conclusive (no route at all).
+        const conclusive = fetchStatus === 404 || fetchStatus === 405
+        io.out(`  判定：${conclusive
+          ? '✗ 面板通道路由未注册（404/405 是确定结论：请求根本没到插件）。'
+          : fetchStatus === 401 || fetchStatus === 403
+            ? '· 只能说明 /api 前缀活着并要求鉴权 —— **无法从这里判断**我们的路由在不在（未鉴权时 /api 下任意路径都回 401）。'
+            : `? 非预期结果（${fetchStatus}）。`}\n`)
+        io.out(`  权威信号在宿主自己手里：调用 zentao_session_status，第一行会打印「面板通道：…」\n`)
+        io.out(`  （已注册 / 未注册 + 原因）。面板加载不出来时先看那一行。\n\n`)
         const status = await session.status(true)
         io.out(`${renderStatus(status)}\n`)
-        return verdict.includes('✓') ? 0 : 1
+        return conclusive ? 1 : 0
       }
 
       case 'login': {

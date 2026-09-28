@@ -13,6 +13,7 @@
  */
 
 import { refreshCookieJar } from './cookies.js'
+import { ZENTAO_FETCH_PATH } from './protocol.js'
 import type { ResolveArgs } from './resolve.js'
 import { ZenTaoAuthError, type SessionStatus, type ZenTaoSession } from './session.js'
 import { resolveBug, ZentaoWorkbench, type BugContext } from './zentao.js'
@@ -212,4 +213,65 @@ function resolveArgs(body: Record<string, unknown>): ResolveArgs {
     force: body.force === true,
     dryRun: body.dryRun === true,
   }
+}
+
+
+/**
+ * The panel transport that actually works in this Host.
+ *
+ * Measured on 0.1.7-rc.2 desktop: private RPC channels (`rpc.handle('/name')`)
+ * are **not mounted** — `POST /zentao/sessionStatus` falls through to
+ * `dsh-host-frontend-static`, which answers 405 for any non-GET/HEAD. What does
+ * work is an exact Fetch route under the shared `/api` prefix: Connection
+ * mounts `/api` itself (Host/Origin fence + browser auth) and dispatches exact
+ * fetch routes *before* the API gateway's interceptor. That is how a working
+ * plugin on this machine exposes `/api/report`.
+ *
+ * `assertFetchRoute` requires the path to live under `/api/`, so the panel gets
+ * exactly one route: `POST /api/zentao` with `{ endpoint, payload }` in the body.
+ */
+export { ZENTAO_FETCH_PATH } from './protocol.js'
+
+export interface FetchRouteLike {
+  path: string
+  methods: string[]
+  requestBody: 'buffered'
+  fetch(request: Request): Promise<Response>
+}
+
+/** Wrap an endpoint handler as the exact Fetch route the Host will mount. */
+export function createZentaoFetchRoute(
+  handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>,
+): FetchRouteLike {
+  return {
+    path: ZENTAO_FETCH_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    async fetch(request: Request): Promise<Response> {
+      let body: { endpoint?: unknown, payload?: unknown }
+      try {
+        body = await request.json() as { endpoint?: unknown, payload?: unknown }
+      } catch {
+        return jsonResponse({ ok: false, error: { code: 'bad-request', message: '请求体不是 JSON' } }, 400)
+      }
+      const endpoint = typeof body.endpoint === 'string' ? body.endpoint : ''
+      if (endpoint === '') {
+        return jsonResponse({ ok: false, error: { code: 'bad-request', message: '缺少 endpoint' } }, 400)
+      }
+      try {
+        const result = await handler(endpoint, body.payload, request.signal)
+        return jsonResponse(result, 200)
+      } catch (error) {
+        // A thrown handler is a bug, not a verdict: keep it visible.
+        return jsonResponse({ ok: false, error: { code: 'handler-failure', message: String((error as Error)?.message ?? error) } }, 500)
+      }
+    },
+  }
+}
+
+function jsonResponse(value: unknown, status: number): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  })
 }

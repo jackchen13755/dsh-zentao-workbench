@@ -64,64 +64,63 @@
     { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: '会话已失效（页面被弹回登录页）', hint: '可在终端跑 ~/.local/bin/zentao-export-cookies 重新导出（会读 Keychain），或改用浏览器桥' },
   ]
 
-  const rpc = {
-    call: async (_channel, endpoint, payload) => {
-      window.__CALLS__.push({ endpoint, payload: payload ?? null })
-      if (UNAUTH && (endpoint === 'getConfig' || endpoint === 'sessionStatus')) {
+  // The panel now POSTs { endpoint, payload } to /api/zentao, so the harness
+  // intercepts fetch instead of an rpc service.
+  const answer = (endpoint, payload) => {
+    switch (endpoint) {
+      case 'getConfig':
+      case 'sessionStatus':
+        return UNAUTH
+          ? { ok: true, value: { server: '', serverSource: 'none', authenticated: false, probes: UNAUTH_PROBES, config: { server: '', authenticated: false, probes: UNAUTH_PROBES } } }
+          : { ok: true, value: { server: 'https://zentao.example.com', serverSource: 'config', authenticated: true, strategy: 'bridge', probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（以实测为准）' }], config: { server: 'https://zentao.example.com', authenticated: true, probes: [] } } }
+      case 'listBugs':
+        return { ok: true, value: { bugs: BUGS, total: BUGS.length, truncated: false, via: 'bridge', url: 'https://zentao.example.com/index.php?m=my&f=bug', fetchedAt: new Date().toISOString(), cached: false } }
+      case 'listTasks':
+        return { ok: true, value: { tasks: [], total: 0, empty: true, via: 'bridge', url: '', fetchedAt: new Date().toISOString(),
+          note: '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败' } }
+      case 'bugContext':
         return { ok: true, value: {
-          server: 'https://zentao.example.com', authenticated: false,
-          probes: UNAUTH_PROBES,
-          config: { server: 'https://zentao.example.com', authenticated: false, probes: UNAUTH_PROBES, hasEnvCookie: false, jarPaths: ['/Users/example/.config/zentao/cookies.txt'] },
-        } }
-      }
-      switch (endpoint) {
-        case 'getConfig':
-        case 'sessionStatus':
-          return { ok: true, value: {
-            server: 'https://zentao.example.com', authenticated: true, strategy: 'bridge',
-            probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（以实测为准）' }],
-            config: { server: 'https://zentao.example.com', authenticated: true, probes: [] },
-          } }
-        case 'listBugs':
-          return { ok: true, value: { bugs: BUGS, total: BUGS.length, via: 'bridge', url: 'https://zentao.example.com/index.php?m=my&f=bug', fetchedAt: new Date().toISOString(), cached: false } }
-        case 'listTasks':
-          return { ok: true, value: { tasks: [], total: 0, empty: true, via: 'bridge', url: '', fetchedAt: new Date().toISOString(),
-            note: '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败' } }
-        case 'bugContext':
-          return { ok: true, value: {
-            bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', status: '激活', assignedTo: 'Dev One', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
-            resolve: {
-              uid: 'kuid-harness',
-              fields: [
-                { name: 'resolution', label: '解决方案', required: true },
-                { name: 'reason', label: 'Bug产生原因', required: true },
-                { name: 'bugInchargedBy', label: 'Bug所属人', required: true },
-                { name: 'changeImpact', label: '代码变更影响范围', required: true },
-                { name: 'detail_reason', label: 'bug详细原因', limit: 512 },
-              ],
-              defaults: { resolution: 'fixed', reason: 'codeBug', bugInchargedBy: '', assignedTo: 'Yanping.Wang', resolvedBuild: '', resolvedDate: '2026-09-28 17:05:00', changeImpact: '' },
-              resolutionOptions: [{ value: 'fixed', text: '已解决' }],
-              reasonOptions: [{ value: 'codeBug', text: '代码错误' }],
-              buildMatches: [],
-              optionCounts: { resolvedBuild: 254, bugInchargedBy: 892, assignedTo: 892 },
-            },
-            histories: ['2026-08-18 16:27:16, 由 Reporter One 创建。'],
-            cachedAt: new Date().toISOString(), cached: false,
-          } }
-        case 'resolvePlan':
-          return { ok: true, value: { plan: {
-            bugID: '55036', status: '激活',
+          bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', status: '激活', assignedTo: 'Dev One', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
+          resolve: {
+            uid: 'kuid-harness',
             fields: [
-              ['resolution', 'fixed'], ['reason', 'codeBug'], ['bugInchargedBy', 'Dev One'],
-              ['assignedTo', 'Yanping.Wang'], ['changeImpact', '本次改动影响范围：Service360（自动填充）'],
+              { name: 'resolution', label: '解决方案', required: true },
+              { name: 'reason', label: 'Bug产生原因', required: true },
+              { name: 'bugInchargedBy', label: 'Bug所属人', required: true },
+              { name: 'changeImpact', label: '代码变更影响范围', required: true },
+              { name: 'detail_reason', label: 'bug详细原因', limit: 512 },
             ],
-            problems: [], autoFilled: { changeImpact: '服务端必填但表单为空，已自动填充最小可接受内容' },
-            notes: [], blocked: false,
-          } } }
-        default:
-          return { ok: false, error: { code: 'stub', message: 'harness 未提供该 endpoint：' + endpoint } }
-      }
-    },
+            defaults: { resolution: 'fixed', reason: 'codeBug', bugInchargedBy: '', assignedTo: 'Yanping.Wang', resolvedBuild: '', resolvedDate: '2026-09-28 17:05:00', changeImpact: '' },
+            resolutionOptions: [{ value: 'fixed', text: '已解决' }],
+            reasonOptions: [{ value: 'codeBug', text: '代码错误' }],
+            buildMatches: [],
+            optionCounts: { resolvedBuild: 254, bugInchargedBy: 892, assignedTo: 892 },
+          },
+          histories: ['2026-08-18 16:27:16, 由 Reporter One 创建。'],
+          cachedAt: new Date().toISOString(), cached: false,
+        } }
+      case 'resolvePlan':
+        return { ok: true, value: { plan: {
+          bugID: '55036', status: '激活',
+          fields: [['resolution', 'fixed'], ['reason', 'codeBug'], ['bugInchargedBy', 'Dev One'], ['assignedTo', 'Yanping.Wang'], ['changeImpact', '本次改动影响范围：Service360（自动填充）']],
+          problems: [], autoFilled: { changeImpact: '服务端必填但表单为空，已自动填充最小可接受内容' },
+          notes: [], blocked: false,
+        } } }
+      default:
+        return { ok: false, error: { code: 'stub', message: 'harness 未提供该 endpoint：' + endpoint } }
+    }
+  }
+
+  const realFetch = window.fetch.bind(window)
+  window.fetch = async (input, init) => {
+    const url = String(typeof input === 'string' ? input : input?.url ?? input)
+    if (url.includes('/api/zentao')) {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      window.__CALLS__.push({ endpoint: body.endpoint, payload: body.payload ?? null })
+      const result = answer(body.endpoint, body.payload)
+      return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return realFetch(input, init)
   }
 
   const ctx = {
@@ -129,7 +128,6 @@
       inject: (_name, callback) => callback(),
       register: (_options, component) => { window.__PANEL__ = component; return () => undefined },
     },
-    connection: { rpc },
     // No sessions/workspaces in the harness: the "处理" button then reports the
     // graceful message the real panel gives when those services are absent.
     get: () => undefined,

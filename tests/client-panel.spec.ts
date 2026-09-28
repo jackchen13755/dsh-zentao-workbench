@@ -48,6 +48,13 @@ const flush = async (rounds = 6): Promise<void> => {
 }
 
 function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>) {
+  // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
+  // stub replaces global fetch instead of injecting an rpc service.
+  ;(globalThis as { fetch?: unknown }).fetch = async (_url: unknown, init?: { body?: string }) => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { endpoint: string, payload?: unknown }
+    const result = await rpc(body.endpoint, body.payload)
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
   const source = readFileSync('lib/client.js', 'utf8')
   let definition: { factory: (require: (name: string) => unknown) => Record<string, unknown> } | undefined
 
@@ -119,7 +126,6 @@ function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true,
         return () => undefined
       },
     },
-    connection: { rpc: { call: async (_channel: string, endpoint: string, payload?: unknown) => rpc(endpoint, payload) } },
     get: () => undefined,
     effect: () => undefined,
   }

@@ -66,7 +66,7 @@ describe('browser bundle', () => {
   it('loads under the host module loader and declares the services it needs', () => {
     const { definition, module } = loadBundle()
     expect(definition.id).toBe('dsh-zentao-workbench')
-    expect(module.inject).toEqual(['slots', 'connection'])
+    expect(module.inject).toEqual(['slots'])
     expect(typeof module.apply).toBe('function')
   })
 
@@ -82,7 +82,6 @@ describe('browser bundle', () => {
           return () => undefined
         },
       },
-      connection: { rpc: { call: async () => ({ ok: true, value: {} }) } },
       get: (name: string) => (name === 'sessions'
         ? { list: { getSnapshot: () => ({ current: undefined }) }, open: () => undefined, scope: () => undefined }
         : name === 'workspaces'
@@ -119,7 +118,6 @@ describe('browser bundle', () => {
           return () => undefined
         },
       },
-      connection: { rpc: { call: async () => ({ ok: true, value: { server: '', authenticated: false, probes: [] } }) } },
       get: () => undefined,
       effect: () => undefined,
     }

@@ -14,12 +14,16 @@ import { apply } from '../src/index.js'
  * These fakes reproduce that semantics (a `get` that throws, an `inject` that
  * hands the service over) so the bug cannot come back silently.
  */
-interface FakeConnection { rpc: { handle: (channel: string, handler: unknown) => () => void } }
+interface FakeConnection {
+  rpc: { handle: (channel: string, handler: unknown) => () => void }
+  fetch?: { register: (route: unknown) => () => void }
+}
 
-function fakeCordis(options: { withInject?: boolean, withConnection?: boolean, getThrows?: boolean } = {}) {
+function fakeCordis(options: { withInject?: boolean, withConnection?: boolean, getThrows?: boolean, withFetch?: boolean } = {}) {
   const tools: string[] = []
   const injected: string[][] = []
   const channels: string[] = []
+  const routes: string[] = []
   const warnings: string[] = []
   const effects: Array<() => void> = []
 
@@ -29,7 +33,12 @@ function fakeCordis(options: { withInject?: boolean, withConnection?: boolean, g
     logger: { info: () => undefined, warn: (message: string) => warnings.push(message) },
     connection: options.withConnection === false
       ? undefined
-      : { rpc: { handle: (channel: string) => { channels.push(channel); return () => undefined } } } satisfies FakeConnection,
+      : {
+          rpc: { handle: (channel: string) => { channels.push(channel); return () => undefined } },
+          ...(options.withFetch === false
+            ? {}
+            : { fetch: { register: (route: unknown) => { routes.push((route as { path: string, methods: string[] }).path); return () => undefined } } }),
+        } satisfies FakeConnection,
   }
 
   const ctx = {
@@ -53,7 +62,7 @@ function fakeCordis(options: { withInject?: boolean, withConnection?: boolean, g
       throw new Error(`service "${name}" is not available`)
     },
   }
-  return { ctx, tools, injected, channels, warnings, effects }
+  return { ctx, tools, injected, channels, routes, warnings, effects }
 }
 
 describe('apply()', () => {
@@ -68,6 +77,24 @@ describe('apply()', () => {
       'zentao_resolve_bug',
     ])
     expect(world.injected).toEqual([['connection']])
+    // Preferred transport on this Host: an exact Fetch route under /api.
+    expect(world.routes).toEqual(['/api/zentao'])
+    // …so the private channel is not attempted at all.
+    expect(world.channels).toEqual([])
+  })
+
+  it('reports why the transport is missing, so a 405 is never a mystery', () => {
+    const missing = fakeCordis({ withConnection: false })
+    apply(missing.ctx as never)
+    const statusTool = missing.tools.find((name) => name === 'zentao_session_status')
+    expect(statusTool).toBeDefined()
+    expect(missing.warnings.join(' ')).toContain('看不到 connection 服务')
+  })
+
+  it('falls back to the private channel when the Host exposes no fetch registry', () => {
+    const world = fakeCordis({ withFetch: false })
+    apply(world.ctx as never)
+    expect(world.routes).toEqual([])
     expect(world.channels).toEqual(['/zentao'])
   })
 
@@ -76,15 +103,16 @@ describe('apply()', () => {
     const world = fakeCordis({ getThrows: true })
     apply(world.ctx as never)
     expect(world.tools).toHaveLength(5)
-    expect(world.channels).toEqual(['/zentao'])
+    expect(world.routes).toEqual(['/api/zentao'])
   })
 
   it('stays usable without a connection service (headless/TUI)', () => {
     const world = fakeCordis({ withConnection: false })
     apply(world.ctx as never)
     expect(world.tools).toHaveLength(5)
+    expect(world.routes).toEqual([])
     expect(world.channels).toEqual([])
-    expect(world.warnings.join(' ')).toContain('panel transport unavailable')
+    expect(world.warnings.join(' ')).toContain('未注册')
   })
 
   it('falls back to a direct registration when the host has no ctx.inject', () => {
@@ -92,13 +120,14 @@ describe('apply()', () => {
     apply(world.ctx as never)
     expect(world.tools).toHaveLength(5)
     // Without `inject` the connection property is still usable…
-    expect(world.channels).toEqual(['/zentao'])
+    expect(world.routes).toEqual(['/api/zentao'])
   })
 
   it('survives a host with neither inject nor a connection service', () => {
     const world = fakeCordis({ withInject: false, withConnection: false, getThrows: true })
     expect(() => apply(world.ctx as never)).not.toThrow()
     expect(world.tools).toHaveLength(5)
+    expect(world.routes).toEqual([])
     expect(world.channels).toEqual([])
   })
 })

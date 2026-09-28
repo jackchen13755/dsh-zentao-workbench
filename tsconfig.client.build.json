@@ -2,16 +2,22 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "lib/.client-build",
-    "rootDir": "src/client",
+    "rootDir": "src",
     "sourceMap": false,
     "types": [],
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src/client/**/*.ts"]
+  "include": [
+    "src/client/**/*.ts"
+  ]
 }

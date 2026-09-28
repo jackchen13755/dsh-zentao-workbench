@@ -12,25 +12,23 @@
  */
 
 import { createElement } from 'react'
+import { ZENTAO_FETCH_PATH, type ZentaoCallRequest, type ZentaoCallResult } from '../protocol.js'
 import { ZentaoPanel, type PanelDeps } from './panel.js'
 
 /**
  * Services this half must have before its first render.
  *
- * Deliberately NOT `sessions` / `workspaces`: only the "处理" button needs them,
- * and a missing client-runtime package must not stop the whole panel from
- * mounting. (Measured: `@deepseek-ai/dsh-client-runtime` is not a host package —
- * dsh-zentao carries its own copy — so hard-depending on it would be fragile.)
+ * Only `slots` (the overlay seat). The host calls go over plain `fetch` to
+ * {@link ZENTAO_FETCH_PATH}, because measuring this Host showed its private RPC
+ * channels are not mounted at all — `POST /zentao/...` is answered by the static
+ * fallback with 405. `sessions`/`workspaces` are read opportunistically for the
+ * "处理" button, so a missing client-runtime package cannot stop the panel.
  */
-export const inject = ['slots', 'connection']
+export const inject = ['slots']
 
 interface SlotsService {
   inject(name: string, callback: () => void | (() => void)): void
   register(options: { name: string, id: string, order?: number }, component: (props: unknown) => unknown): () => void
-}
-
-interface RpcFace {
-  call(channel: string, endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown } | { ok: false, error: { code: string, message: string } }>
 }
 
 interface SessionListLike { getSnapshot(): { current?: string } }
@@ -53,7 +51,6 @@ interface WorkspacesFace {
 
 interface ClientContext {
   readonly slots: SlotsService
-  readonly connection: { rpc: RpcFace }
   effect(callback: () => void | (() => void), label?: string): void
   /** Optional services, read without a hard dependency. */
   get?(name: string): unknown
@@ -87,9 +84,29 @@ function buildHandlePrompt(ctx: ClientContext) {
   }
 }
 
+/**
+ * One call to the host. Same-origin, so the browser's session cookie travels
+ * with it; the Host applies its Host/Origin fence and browser auth itself.
+ */
+async function callHost(endpoint: string, payload?: unknown): Promise<ZentaoCallResult> {
+  const body: ZentaoCallRequest = { endpoint, payload }
+  const response = await fetch(ZENTAO_FETCH_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    throw new Error(`面板通道 ${ZENTAO_FETCH_PATH} 返回 HTTP ${response.status}`
+      + (response.status === 404 || response.status === 405
+        ? '（宿主要么没加载这个插件的宿主半边，要么它的 fetch 路由没注册成功 —— 跑 zentao doctor 确认）'
+        : ''))
+  }
+  return await response.json() as ZentaoCallResult
+}
+
 export function apply(ctx: ClientContext): void {
   const deps: PanelDeps = {
-    rpc: ctx.connection.rpc,
+    call: callHost,
     handlePrompt: buildHandlePrompt(ctx),
   }
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(

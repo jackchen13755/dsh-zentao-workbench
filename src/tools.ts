@@ -22,6 +22,14 @@ export interface ToolDeps {
   workbench: ZentaoWorkbench
   /** Injected by tests; defaults to the real implementations. */
   resolve?: typeof resolveBug
+  /**
+   * Why the panel transport is (or is not) registered.
+   *
+   * Reported by `zentao_session_status` on purpose: the registration failing
+   * silently is exactly what made a 405 look like a login problem for two
+   * rounds, and a tool call is the cheapest way to see the truth.
+   */
+  panelTransport?: () => string
 }
 
 type Rendered = Array<{ type: 'text', text: string }>
@@ -84,7 +92,10 @@ export function createTools(deps: ToolDeps): unknown[] {
       },
       async execute(args): Promise<{ text: string }> {
         const status = await session.status((args as { refresh?: boolean }).refresh === true)
-        return { text: renderStatus(status) }
+        const transport = deps.panelTransport?.() ?? '（未上报）'
+        // The panel's transport belongs in this report: when it is missing the
+        // panel shows transport errors that look like login problems.
+        return { text: `面板通道：${transport}\n${renderStatus(status)}` }
       },
     }),
 

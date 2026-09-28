@@ -136,6 +136,22 @@ node scripts/probe-write-path.mjs 55036        # 需要会话（ZENTAO_* 环境�
 回读状态与提交前一致 → **单据未被改动**，退出码 0。
 这条同时独立证实了本插件要修的那个 retry 根源：服务端在缺 `changeImpact` 时确实会拒绝。
 
+## 布局铁律：只用视口单位，不用百分比（2026-09-28 实测）
+
+外壳的 overlay 是**带 transform、且高度 auto 的祖先** —— 它成为 `position: fixed` 的
+定位盒，于是百分比会按它解析。Chromium 实测三种定位盒下抽屉的实际高度：
+
+| 布局 | 定位盒 | `height:100%` + `max-height:100%` | `height:100vh` + `max-height:100vh` |
+|---|---|---|---|
+| plain | 视口 | 800px ✓ | 800px ✓ |
+| **autoheight（有 transform、高度 auto = 真实外壳）** | 该祖先 | **0px ✗ 塌掉（"最大化后全部靠上了"）** | **800px ✓** |
+| clipped | 520×360 祖先 | 360px | 800px |
+
+所以抽屉用 `height:100vh; max-height:100vh`、标签用 `top:50vh`（**不是 `50%`**，
+后者同样会解析成 0 → 标签贴顶）。视口单位在任何容器里都有确定值。
+（教训：我曾因为 harness 里那个 520×360 的合成容器把 `100vh` 改成 `100%`，
+属于**过度拟合测试环境** —— 合成容器比真实外壳更严苛，反而把真实场景改坏了。）
+
 ## 浏览器 harness（不重启也能看面板）
 
 面板正常只在 DSH 外壳里渲染，而新接线的插件要重启宿主才会被加载。`tests/browser-harness/`

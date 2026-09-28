@@ -293,7 +293,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     onClick: () => setOpen((value) => !value),
     style: {
       position: 'fixed',
-      top: '50%',
+      // `50vh`, not `50%`: a percentage resolves against the containing block,
+      // and the shell's overlay is a transformed ancestor **without a definite
+      // height** — where `50%` becomes 0 and the tab snaps to the top. Viewport
+      // units are definite in every container.
+      top: '50vh',
       right: 0,
       transform: 'translateY(-50%)',
       zIndex: 9999,
@@ -573,10 +577,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       zIndex: 10000,
       width: 384,
       maxWidth: '92vw',
-      // `100%` (not `100vh`): follow the box we are actually positioned
-      // against. Measured in a 520x360 containing block, `100vh` overflowed it
-      // by 440px; `100%` fits both that case and a full-window overlay.
-      height: '100%',
+      // Viewport height, never a percentage. Measured in Chromium: with a
+      // transformed ancestor whose height is auto (the shell's overlay), both
+      // `height: 100%` and `max-height: 100%` resolve to 0 — the drawer vanished
+      // / collapsed to the top ("最大化后全部靠上了"). `100vh` is definite
+      // everywhere; the cap is viewport-based too, so it can never be 0.
+      height: '100vh',
+      maxHeight: '100vh',
+      boxSizing: 'border-box',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',

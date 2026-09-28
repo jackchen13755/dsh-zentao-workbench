@@ -140,7 +140,9 @@ describe('browser bundle', () => {
     const style = tree.props.style as Record<string, unknown>
     expect(style.position).toBe('fixed')
     expect(style.right).toBe(0)
-    expect(style.top).toBe('50%')
+    // Viewport units only: percentages collapse to 0 inside the shell's
+    // transformed, auto-height overlay (measured), which parked the tab at the top.
+    expect(style.top).toBe('50vh')
     expect(String(style.transform)).toContain('translateY(-50%)')
     expect(style.left).toBeUndefined()
   })

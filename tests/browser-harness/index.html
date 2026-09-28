@@ -11,6 +11,10 @@
   /* ?layout=clipped reproduces the shell's overlay: a transformed ancestor
      becomes the containing block for position:fixed, and overflow:hidden clips
      anything placed with viewport math. */
+  /* ?layout=autoheight reproduces the shell that made the drawer collapse:
+     the transformed ancestor establishes the containing block but has NO
+     definite height, so `height: 100%` resolves to auto (content height). */
+  #auto { position: absolute; left: 0; top: 0; right: 0; transform: translateZ(0); }
   #clip { position: absolute; left: 240px; top: 160px; width: 520px; height: 360px;
     border: 1px dashed #4b5563; border-radius: 8px;
     transform: translateZ(0); overflow: hidden; background: rgba(255,255,255,.02); }
@@ -27,6 +31,7 @@
 </div>
 <div id="root"></div>
 <div id="clip" style="display:none"><div id="clipRoot"></div></div>
+<div id="auto" style="display:none"><div id="autoRoot"></div></div>
 
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
@@ -51,11 +56,12 @@
   const params = new URLSearchParams(location.search)
   const UNAUTH = params.get('state') === 'unauth'
   // Mount inside the transformed/clipped container to reproduce the shell.
-  const CLIPPED = params.get('layout') === 'clipped'
-  if (CLIPPED) {
-    document.getElementById('clip').style.display = 'block'
-    document.getElementById('root').style.display = 'none'
-  }
+  const LAYOUT = params.get('layout') ?? 'plain'
+  const CLIPPED = LAYOUT === 'clipped'
+  const AUTOHEIGHT = LAYOUT === 'autoheight'
+  if (LAYOUT !== 'plain') document.getElementById('root').style.display = 'none'
+  if (CLIPPED) document.getElementById('clip').style.display = 'block'
+  if (AUTOHEIGHT) document.getElementById('auto').style.display = 'block'
   const UNAUTH_PROBES = [
     { id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（该标志不可靠，以实测为准）', hint: '守护进程在，但扩展没有在轮询：打开 Chrome 确认 dsh-fetch-page 扩展已启用，然后重试' },
     { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: 'jar 可用（10 个 cookie，3 个会话级），导出时间 2026/9/28 16:37:16', hint: '含会话级 cookie：浏览器一关就失效，需要时重新导出' },
@@ -138,7 +144,7 @@
 <script src="vendor/client.js"></script>
 
 <script>
-  const clipMount = () => (CLIPPED ? 'clipRoot' : 'root')
+  const clipMount = () => (CLIPPED ? 'clipRoot' : AUTOHEIGHT ? 'autoRoot' : 'root')
   const status = document.getElementById('status')
   try {
     if (definition === undefined) throw new Error('bundle 没有调用 window.__ModuleLoader__.load')

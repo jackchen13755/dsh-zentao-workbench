@@ -173,6 +173,21 @@ const DISCIPLINE = [
  * correctly on the light and the dark theme.
  */
 /**
+ * Is this resolve-form value ZenTao's untouched HTML template?
+ *
+ * The default carries the boilerplate headings `[产生原因及改进]` /
+ * `[漏测原因及改进]` plus padding `<br>`s. Submitting it wrote markup into the
+ * ticket, and displaying it puzzled everyone who saw the raw tags — so the panel
+ * hides it (the host also converts it to plain text before submitting).
+ */
+function isFormTemplate(name: string, value: unknown): boolean {
+  if (name !== 'detail_reason') return false
+  const text = String(value ?? '')
+  if (text.trim() === '') return false
+  return /\[\s*产生原因及改进\s*\]/.test(text) || /\[\s*漏测原因及改进\s*\]/.test(text)
+}
+
+/**
  * Render a resolve-form value.
  *
  * ZenTao's `detail_reason` default is an HTML template
@@ -1076,9 +1091,21 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: { borderTop: `1px solid ${TOKEN.line}`, marginTop: 12, paddingTop: 10 },
       },
           createElement('div', { style: { fontWeight: 600, marginBottom: 4 } }, plan.blocked ? '解决计划（被拦，不能提交）' : '解决计划（预览，未提交）'),
-          ...plan.fields.map(([name, value]) => createElement('div', { key: name, style: { fontSize: 12, display: 'flex', gap: 6 } },
-            createElement('span', { style: { color: TOKEN.dim, minWidth: 108 } }, name),
-            richValue(value))),
+          ...plan.fields
+            // The form's `detail_reason` default is ZenTao's HTML template
+            // (`<p><strong>[产生原因及改进]</strong>…`). It is boilerplate, not
+            // content, and showing it only ever caused confusion — so it is
+            // hidden rather than rendered (user: 「隐藏掉这个」). A one-line note
+            // keeps the field's existence visible.
+            .filter(([name, value]) => !isFormTemplate(name, value))
+            .map(([name, value]) => createElement('div', { key: name, style: { fontSize: 12, display: 'flex', gap: 6 } },
+              createElement('span', { style: { color: TOKEN.dim, minWidth: 108 } }, name),
+              richValue(value))),
+          ...(plan.fields.some(([name, value]) => isFormTemplate(name, value))
+            ? [createElement('div', { key: 'tpl-hidden', style: { fontSize: 11, color: TOKEN.dim, marginTop: 2, display: 'flex', gap: 6 } },
+                createElement('span', { style: { minWidth: 108 } }, 'detail_reason'),
+                createElement('span', { title: '未填写时禅道表单给的是 HTML 模板，已隐藏；不影响提交' }, '（表单模板，已隐藏）'))]
+            : []),
           ...Object.entries(plan.autoFilled).map(([name, why]) => createElement('div', { key: `af-${name}`, style: { fontSize: 11, color: TOKEN.dim, marginTop: 2 } }, `↳ ${name}：${why}`)),
           ...plan.problems.map((problem) => createElement('div', { key: problem, style: { fontSize: 12, color: TOKEN.danger, marginTop: 2 } }, `✘ ${problem}`)),
           createElement('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },

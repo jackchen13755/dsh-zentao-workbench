@@ -96,6 +96,11 @@ export class ZenTaoSession {
     return `${this.server}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`
   }
 
+  /** Jar paths, for display only — a client must never receive cookie values. */
+  jarPathsForDisplay(): string[] {
+    return [...this.jarPaths]
+  }
+
   /** Drop caches so the next call re-probes (call after a login/logout or a jar refresh). */
   invalidate(): void {
     this.cachedJar = null

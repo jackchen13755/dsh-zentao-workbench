@@ -7,12 +7,22 @@
  * model guess at 254/892-option dropdowns.
  */
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { createZentaoRpcHandler, ZENTAO_RPC_CHANNEL } from './rpc.js'
+
 type Disposer = void | (() => void)
+
+interface ConnectionRpcFace {
+  handle(channel: string, handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>): () => Promise<void>
+}
 
 interface MinimalContext {
   effect(fn: () => Disposer): void
   tools: { register(tool: unknown): () => void }
   logger?: { info?: (message: string) => void, warn?: (message: string) => void }
+  /** Read a service without declaring it as a hard dependency. */
+  get?(name: string): unknown
 }
 
 export const name = 'dsh-zentao-workbench'
@@ -29,6 +39,13 @@ export interface PluginConfig {
   cookieJarPath?: string
   bugContextTtlMs?: number
   listTtlMs?: number
+  /** Script the panel's "重新导出 cookie" button runs (path only). */
+  cookieExportScript?: string
+}
+
+/** Default export script location, resolved at runtime rather than hardcoded. */
+function defaultExportScript(): string {
+  return join(homedir(), '.local', 'bin', 'zentao-export-cookies')
 }
 
 export { bridgeDaemonStatus, bridgeForward } from './bridge.js'
@@ -53,6 +70,7 @@ export { alertMessage, compressToLimit, planResolve, renderPlan, submitResolve, 
 export { normalizeServer, renderStatus, ZenTaoAuthError, ZenTaoSession, type SessionStatus, type StrategyId } from './session.js'
 export { createTools } from './tools.js'
 export { resolveBug, ZentaoWorkbench, type BugContext, type MyBugsResult } from './zentao.js'
+export { createZentaoRpcHandler, ZENTAO_RPC_CHANNEL, type RpcResult } from './rpc.js'
 
 import { ZenTaoSession } from './session.js'
 import { createTools } from './tools.js'
@@ -74,6 +92,27 @@ export function apply(ctx: MinimalContext, pluginConfig?: PluginConfig): void {
       disposers.push(ctx.tools.register(tool))
       ctx.logger?.info?.(`[dsh-zentao-workbench] registered tool: ${(tool as { name?: string }).name ?? '?'}`)
     }
+
+    // The panel needs a transport; a TUI/headless profile simply has none, and
+    // the tools above stay useful there — hence the opportunistic lookup
+    // instead of a hard `inject` on the connection service.
+    const connection = ctx.get?.('connection') as { rpc?: ConnectionRpcFace } | undefined
+    if (connection?.rpc !== undefined) {
+      const handler = createZentaoRpcHandler({
+        session,
+        workbench,
+        exportScript: pluginConfig?.cookieExportScript ?? defaultExportScript(),
+        exportJarPath: pluginConfig?.cookieJarPath,
+      })
+      const dispose = connection.rpc.handle(ZENTAO_RPC_CHANNEL, (endpoint, payload, signal) => handler(endpoint, payload, signal))
+      disposers.push(() => {
+        void Promise.resolve(dispose()).catch(() => undefined)
+      })
+      ctx.logger?.info?.(`[dsh-zentao-workbench] rpc channel ${ZENTAO_RPC_CHANNEL} registered (panel transport)`)
+    } else {
+      ctx.logger?.info?.('[dsh-zentao-workbench] no connection service — panel transport unavailable, tools only')
+    }
+
     ctx.logger?.info?.('[dsh-zentao-workbench] loaded (browser-bridge-first session; resolve plans before it posts)')
     return () => {
       for (const dispose of disposers.reverse()) {

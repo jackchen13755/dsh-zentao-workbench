@@ -19,6 +19,8 @@ export function fakeSession(handler: (path: string, method: 'GET' | 'POST', body
     get posts() { return posts },
     url: (path: string) => (path.startsWith('http') ? path : `${base}${path}`),
     invalidate: () => undefined,
+    /** Mirrors the real session's display-only accessor (paths, never values). */
+    jarPathsForDisplay: () => ['/tmp/fake-jar.txt'],
     async get(path: string): Promise<PageResult> {
       gets.push(path)
       const out = handler(path, 'GET')

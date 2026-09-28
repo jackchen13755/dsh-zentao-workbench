@@ -157,12 +157,16 @@
     connectWorkspace: async () => 's2',
   }
   let sidebarBody
+  let sidebarTitle
   let tabType
   const ctx = {
     slots: {
       inject: (name, callback) => { window.__HARNESS__.slots = [...(window.__HARNESS__.slots ?? []), name]; callback() },
       register: (options, component) => {
-        if (options.key !== undefined) sidebarBody = component
+        // Two keyed seats exist now (body + title chip); select by seat name,
+        // otherwise the chip would overwrite the body.
+        if (options.name === 'sidebar.right.pane.tab') sidebarBody = component
+        else if (options.name === 'sidebar.right.pane.tab.title') sidebarTitle = component
         else window.__PANEL__ = component
         return () => undefined
       },
@@ -172,11 +176,17 @@
     // 右缘入口（这正是要验证的行为），浮层变体也就没东西可点了。
     inject: (deps, callback) => (SIDEBAR
       ? callback({
-          get: (name) => (name === 'sidebarRightTabs'
-            ? { register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined } }
-            : undefined),
+          // 真实形态：服务按属性暴露（cordis 的 get 是严格的）
+          sidebarRightTabs: {
+            register: (definition) => { tabType = definition; window.__HARNESS__.tabType = definition; return () => undefined },
+          },
+          sidebarRight: {
+            openTab: (target, scope) => { (window.__HARNESS__.openedTabs ??= []).push({ target, scope }) },
+          },
+          sessions,
+          workspaces,
         })
-      : callback({ get: () => undefined, sessions, workspaces })),
+      : callback({ sessions, workspaces })),
     // No `betterSidebar` here: the entry then falls back to the floating drawer,
     // which is what the harness exercises. The sidebar path (openTab) is pinned
     // by the unit test instead.

@@ -111,14 +111,15 @@ describe('browser bundle', () => {
           return () => undefined
         },
       },
-      // The seat registrations go through `ctx.inject(['sidebarRightTabs'], …)`.
+      // The seat registrations go through `ctx.inject(['sidebarRightTabs'], …)`
+      // and the open through `ctx.inject(['sidebarRight'], …)`. Both are read as
+      // PROPERTIES, which is the shape the shipped docs describe.
       inject: (deps: string[], callback: (context: unknown) => unknown) => {
         injectedServices.push(deps)
-        return callback({ get: (name: string) => (name === 'sidebarRightTabs'
-          ? { register: (definition: { id: string, kind: string, title: () => string }) => { tabTypes.push(definition); return () => undefined } }
-          : undefined) })
+        const sidebarRightTabs = { register: (definition: { id: string, kind: string, title: () => string }) => { tabTypes.push(definition); return () => undefined } }
+        const sidebarRight = { openTab: (tab: unknown) => { openedTab = tab } }
+        return callback({ sidebarRightTabs, sidebarRight })
       },
-      get: (name: string) => (name === 'betterSidebar' ? { openTab: (tab: unknown) => { openedTab = tab } } : undefined),
       effect: (callback: () => unknown) => callback(),
     }
     ;(module.apply as (context: unknown) => void)(ctx)
@@ -136,6 +137,14 @@ describe('browser bundle', () => {
     expect(body).toBeDefined()
     const outer = body!.component({}) as { props: Record<string, unknown> }
     expect(outer.props.variant).toBe('sidebar')
+
+    // The shipped contract also registers the tab's *chip/title* seat — without
+    // it the tab has a body but no label.
+    expect(injectedSlots).toContain('sidebar.right.pane.tab.title')
+
+    // Registering a type is not enough on a tab-based sidebar: something must
+    // open it, otherwise it never becomes visible. The plugin opens it itself.
+    expect(openedTab).toEqual({ type: 'dsh-zentao-workbench:panel' })
 
     // The floating tab opens the sidebar tab rather than its own drawer.
     const overlay = registered.find((entry) => entry.options.id === 'zentao-workbench')
@@ -157,7 +166,8 @@ describe('browser bundle', () => {
           return () => undefined
         },
       },
-      // Strict `get` throws for an absent service, as cordis does.
+      // No sidebar services at all: `inject` never delivers them.
+      inject: (_deps: string[], _callback: (context: unknown) => unknown) => undefined,
       get: (name: string) => { throw new Error(`service "${name}" is not available`) },
       effect: (callback: () => unknown) => callback(),
     }

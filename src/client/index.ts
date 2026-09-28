@@ -137,6 +137,8 @@ async function callHost(endpoint: string, payload?: unknown): Promise<ZentaoCall
 export function apply(ctx: ClientContext): void {
   /** True once the native sidebar is hosting the panel (then the tab hides). */
   let sidebarReady = false
+  /** Set once the sidebar controller is visible; opens/focuses our tab. */
+  let openSidebarTab: (() => void) | undefined
 
   /**
    * Services for the 处理/一键修复 buttons, captured when they become visible.
@@ -169,14 +171,11 @@ export function apply(ctx: ClientContext): void {
    * drawer on a host whose sidebar is composed differently.
    */
   const openInSidebar = (): boolean => {
+    if (openSidebarTab === undefined) return false
     try {
-      const sidebar = ctx.get?.('betterSidebar') as SidebarController | undefined
-      if (sidebar?.openTab === undefined) return false
-      sidebar.openTab({ type: SIDEBAR_TYPE })
+      openSidebarTab()
       return true
     } catch {
-      // `get` is strict on cordis: an absent service throws rather than
-      // returning undefined, and a missing sidebar must not break the tab.
       return false
     }
   }
@@ -185,7 +184,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     if (ctx.inject === undefined) return undefined
     return ctx.inject(['sidebarRightTabs'], (scoped) => {
-      const tabs = scoped.get?.('sidebarRightTabs') as NativeTabType | undefined
+      // Read as a PROPERTY: cordis' `get` is strict and throws when a service is
+      // not visible, which made this registration silently never happen.
+      const tabs = (scoped as unknown as { sidebarRightTabs?: NativeTabType }).sidebarRightTabs
+        ?? (scoped.get?.('sidebarRightTabs') as NativeTabType | undefined)
       if (tabs === undefined) return undefined
       const dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
       // From here on the right-edge button is redundant: the sidebar hosts the
@@ -195,11 +197,38 @@ export function apply(ctx: ClientContext): void {
     }) as () => void
   }, 'dsh-zentao-workbench: native sidebar tab')
 
-  // 2) the tab body — same component, inline variant (no floating tab/drawer)
+  /**
+   * Open the tab so it is actually visible.
+   *
+   * The right sidebar is *tab* based: registering a type only makes it
+   * available, nothing appears until something calls `sidebarRight.openTab`
+   * (measured from the shipped docs: the schedule plugin opens its type "from
+   * the Session entry"). Without this the tab exists but nobody ever sees it.
+   */
+  ctx.effect(() => {
+    if (ctx.inject === undefined) return undefined
+    return ctx.inject(['sidebarRight'], (scoped) => {
+      const right = (scoped as unknown as { sidebarRight?: SidebarController }).sidebarRight
+      if (right?.openTab === undefined) return undefined
+      openSidebarTab = () => { right.openTab?.({ type: SIDEBAR_TYPE }) }
+      // Auto-open once, so the entry is visible without hunting for it.
+      try { openSidebarTab() } catch { /* opening is best-effort */ }
+      return () => { openSidebarTab = undefined }
+    }) as () => void
+  }, 'dsh-zentao-workbench: open the sidebar tab')
+
+  // 2) the tab body AND its title chip — the shipped contract registers both
+  //    seats under the definition's id ("its body and chip into the keyed
+  //    sidebar.right.pane.tab and sidebar.right.pane.tab.title seats").
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     { name: 'sidebar.right.pane.tab', key: SIDEBAR_TYPE, inject: () => ({}) },
     (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...base, variant: 'sidebar' }),
   )), 'dsh-zentao-workbench: sidebar pane body')
+
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab.title', key: SIDEBAR_TYPE },
+    () => createElement('span', { title: '禅道工作台' }, '禅道'),
+  )), 'dsh-zentao-workbench: sidebar tab chip')
 
   // 3) the floating tab, which now doubles as the sidebar entry
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(

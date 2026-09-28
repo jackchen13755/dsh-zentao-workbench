@@ -8,7 +8,7 @@
  *    four-strategy report with the next action per strategy, because "未登录"
  *    on its own is what made the old flow waste turns.
  */
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 type RpcResult = { ok: true, value: unknown } | { ok: false, error: { code: string, message: string } }
 
@@ -58,17 +58,36 @@ interface Plan {
   blocked: boolean
 }
 
+/**
+ * Layout follows the reference plugin (`@haoyu-qi/dsh-zentao`'s client half,
+ * read from its own bundle): a vertical tab glued to the right edge plus a
+ * right-edge drawer, positioned **only** with CSS.
+ *
+ * Why this replaced viewport math: a transformed/filtered ancestor becomes the
+ * containing block for `position: fixed`, so computing `left` from
+ * `window.innerWidth` put the entry outside the clipped overlay the moment the
+ * shell was maximized (measured: entry landed at the container's left edge,
+ * x=5). `right: 0` + `top: 50%` cannot drift, in any container, at any size.
+ */
+const FAB_TEXT = '禅道'
+
 const ROLE_PRESETS: Array<{ key: string, label: string, prompt: (reference: string) => string }> = [
   { key: 'dev', label: '开发', prompt: (ref) => `${ref}\n\n请按开发角度处理这个 Bug：先复现、定位根因、给出最小改动修复并自测，必要时补充用例。` },
   { key: 'qa', label: '测试', prompt: (ref) => `${ref}\n\n请按测试角度处理：核对修复是否覆盖原始复现步骤，列出回归范围与验证步骤。` },
   { key: 'pm', label: '产品', prompt: (ref) => `${ref}\n\n请按产品角度处理：确认预期行为与验收标准，指出需求或交互上需要澄清的点。` },
 ]
 
+/**
+ * Theme tokens, copied from the reference plugin's stylesheet so the drawer
+ * follows the shell's own light/dark theme instead of a hardcoded palette.
+ * (My first version invented `--dsw-alias-text-1` / `-bg-2`; those names do not
+ * exist, so every colour silently fell back to the hardcoded value.)
+ */
 const TOKEN = {
-  text: 'var(--dsw-alias-text-1, #e6e6e6)',
-  dim: 'var(--dsw-alias-text-3, #9a9a9a)',
-  line: 'var(--dsw-alias-border-1, rgba(255,255,255,.14))',
-  bg: 'var(--dsw-alias-bg-2, #1b1c1f)',
+  text: 'var(--dsw-alias-label-primary, #111)',
+  dim: 'var(--dsw-alias-label-secondary, #888)',
+  line: 'var(--dsw-alias-border-l1, #e5e7eb)',
+  bg: 'var(--dsw-alias-bg-layer-1, #fff)',
   accent: '#2563eb',
   danger: '#dc2626',
   ok: '#16a34a',
@@ -106,7 +125,6 @@ function referenceOf(bug: { id: string, title: string, status?: string, pri?: st
 
 export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState<{ x: number, y: number }>(() => ({ x: window.innerWidth - 56, y: window.innerHeight / 2 - 40 }))
   const [config, setConfig] = useState<Config | null>(null)
   const [bugs, setBugs] = useState<BugRow[]>([])
   const [only, setOnly] = useState<'all' | 'open'>('open')
@@ -121,9 +139,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [bugsTotal, setBugsTotal] = useState<{ total: number, truncated: boolean }>({ total: 0, truncated: false })
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [taskNote, setTaskNote] = useState('')
+  const [serverDraft, setServerDraft] = useState('')
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
-  const drag = useRef<{ active: boolean, dx: number, dy: number, moved: boolean }>({ active: false, dx: 0, dy: 0, moved: false })
 
   const call = useCallback(async (endpoint: string, payload?: unknown): Promise<unknown> => {
     const result = await deps.rpc.call('/zentao', endpoint, payload)
@@ -226,27 +244,6 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     return () => window.clearTimeout(timer)
   }, [flash])
 
-  const onPointerDown = useCallback((event: { clientX: number, clientY: number }) => {
-    drag.current = { active: true, dx: event.clientX - pos.x, dy: event.clientY - pos.y, moved: false }
-  }, [pos.x, pos.y])
-
-  useEffect(() => {
-    const move = (event: PointerEvent): void => {
-      if (!drag.current.active) return
-      // A few pixels of slop: a click that jitters must not count as a drag,
-      // and a drag must not toggle the panel on release.
-      if (Math.abs(event.clientX - (pos.x + drag.current.dx)) > 3 || Math.abs(event.clientY - (pos.y + drag.current.dy)) > 3) drag.current.moved = true
-      setPos({ x: Math.max(8, Math.min(window.innerWidth - 48, event.clientX - drag.current.dx)), y: Math.max(8, Math.min(window.innerHeight - 48, event.clientY - drag.current.dy)) })
-    }
-    const up = (): void => { drag.current.active = false }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
-  }, [])
-
   const openDetail = useCallback(async (bugID: string) => {
     setBusy(`detail:${bugID}`)
     setPlan(null)
@@ -282,36 +279,34 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     }
   }, [])
 
+  // Right-edge vertical tab — the reference plugin's `fab`. Hover widening is
+  // dropped (inline styles cannot express :hover) but the geometry is identical:
+  // glued to the right edge, vertically centred, so no viewport can hide it.
   const entry = createElement('button', {
     type: 'button',
-    // Stable hooks for automated UI checks (the browser harness and any future
-    // end-to-end test drive the panel through these, not through CSS shapes).
     'data-zentao-entry': '1',
-    title: '禅道工作台（可拖动）',
-    onPointerDown,
-    onClick: () => {
-      if (drag.current.moved) { drag.current.moved = false; return }
-      setOpen((value) => !value)
-    },
+    title: '禅道工作台',
+    onClick: () => setOpen((value) => !value),
     style: {
-      ...box,
       position: 'fixed',
-      left: pos.x,
-      top: pos.y,
-      width: 40,
-      height: 40,
-      // Above the panel (9999): an open panel used to overlap the entry and
-      // swallow its clicks, so the entry could not be used to collapse it.
-      zIndex: 10000,
-      cursor: 'grab',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontWeight: 700,
+      top: '50%',
+      right: 0,
+      transform: 'translateY(-50%)',
+      zIndex: 9999,
+      writingMode: 'vertical-rl',
       color: '#fff',
-      background: config?.authenticated === true ? TOKEN.accent : '#6b7280',
+      cursor: 'pointer',
+      letterSpacing: 3,
+      background: TOKEN.accent,
+      border: 'none',
+      borderRadius: '8px 0 0 8px',
+      padding: '16px 8px',
+      fontSize: 13,
+      fontWeight: 600,
+      fontFamily: 'system-ui,-apple-system,"PingFang SC",sans-serif',
+      boxShadow: '-2px 0 10px rgba(0,0,0,.18)',
     },
-  }, '禅')
+  }, FAB_TEXT)
 
   if (!open) return entry
 
@@ -326,6 +321,43 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   if (error !== '') body.push(createElement('div', { key: 'err', style: { padding: '8px 12px', color: TOKEN.danger, fontSize: 12 } }, error))
 
   if (!authenticated) {
+    if ((config?.server ?? '') === '') {
+      body.push(createElement('div', { key: 'server', style: { padding: '10px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
+        createElement('div', { style: { color: TOKEN.danger, marginBottom: 4 } },
+          '还没配置禅道实例地址 —— 没有它，下面四条登录路径都无从探测。'),
+        createElement('div', { style: { display: 'flex', gap: 6 } },
+          createElement('input', {
+            'data-zentao-server': '1',
+            // No host-shaped placeholder: the bundle guard forbids anything
+            // that looks like a real domain, and it is right to — a template is
+            // clearer than a fake host someone might actually submit.
+            placeholder: 'https://<实例域名>',
+            value: serverDraft,
+            onChange: (event: { target: { value: string } }) => setServerDraft(event.target.value),
+            style: { flex: 1, minWidth: 0 },
+          }),
+          createElement('button', {
+            type: 'button',
+            'data-zentao-action': 'set-server',
+            disabled: serverDraft === '' || busy === 'server',
+            style: { cursor: serverDraft === '' ? 'not-allowed' : 'pointer' },
+            onClick: async () => {
+              setBusy('server')
+              try {
+                await call('setServer', { server: serverDraft })
+                setFlash('实例地址已设置，正在重新探测…')
+                await refreshStatus(true)
+              } catch (problem) {
+                setError((problem as Error).message)
+              } finally {
+                setBusy('')
+              }
+            },
+          }, busy === 'server' ? '设置中…' : '保存')),
+        createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 4 } },
+          '想让它每次启动都生效：在 profile 的 cordis.patch.yml 里给 zentao-workbench 那行加 config: { server: … }，或设环境变量 ZENTAO_BASE；本机若已导出过 cookie jar，也会自动从 jar 里认出实例。')))
+    }
+
     body.push(createElement('div', { key: 'probes', style: { padding: '10px 12px' } },
       createElement('div', { style: { color: TOKEN.dim, marginBottom: 6 } }, '未登录 —— 每条登录路径的探测结果与下一步：'),
       ...(config?.probes ?? []).map((probe) => createElement('div', { key: probe.id, style: { padding: '6px 0', borderTop: `1px solid ${TOKEN.line}` } },
@@ -521,28 +553,62 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   }
 
   const stamp = lastUpdated === null ? '尚未刷新' : `最近更新 ${lastUpdated.toLocaleTimeString()}`
-  const footer = flash === ''
-    ? createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8 } },
-        createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
-        createElement('span', { 'data-zentao-stamp': '1' }, stamp))
-    : createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.ok, fontSize: 11 } }, flash)
+  // The footer always states the instance and the last refresh time; transient
+  // messages go to the corner toast instead of replacing this line.
+  const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8 } },
+    createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
+    createElement('span', { 'data-zentao-stamp': '1' }, stamp))
 
+  // Right-edge drawer, mirroring the reference plugin's `panel`.
   const panel = createElement('div', {
+    'data-zentao-panel': '1',
     style: {
-      ...box,
       position: 'fixed',
-      left: Math.max(8, Math.min(window.innerWidth - 372, pos.x - 332 - 12)),
-      top: Math.max(8, Math.min(window.innerHeight - 440, pos.y - 20)),
-      width: 364,
-      maxHeight: '80vh',
+      top: 0,
+      right: 0,
+      zIndex: 10000,
+      width: 384,
+      maxWidth: '92vw',
+      // `100%` (not `100vh`): follow the box we are actually positioned
+      // against. Measured in a 520x360 containing block, `100vh` overflowed it
+      // by 440px; `100%` fits both that case and a full-window overlay.
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      zIndex: 9999,
       overflow: 'hidden',
+      background: TOKEN.bg,
+      color: TOKEN.text,
+      borderLeft: `1px solid ${TOKEN.line}`,
+      boxShadow: '-8px 0 28px rgba(0,0,0,.14)',
+      fontFamily: 'system-ui,-apple-system,"PingFang SC",sans-serif',
+      fontSize: 13,
     },
   }, header, createElement('div', { style: { overflow: 'auto', flex: 1 } }, ...body), footer)
 
-  return createElement('div', null, entry, panel)
+  // The drawer covers the right edge, so the tab is not rendered while it is
+  // open (the reference plugin leaves its fab underneath and relies on the ✕;
+  // hiding it removes the overlap instead of depending on z-order).
+  const fab = open ? null : entry
+
+  // Transient messages live in their own corner toast (never in the layout flow).
+  if (flash === '') return createElement('div', null, fab, panel)
+  const toast = createElement('div', {
+    'data-zentao-toast': '1',
+    style: {
+      position: 'fixed',
+      bottom: 26,
+      right: 26,
+      zIndex: 10001,
+      background: 'var(--dsw-alias-bg-overlay, #333)',
+      color: 'var(--dsw-alias-label-primary, #fff)',
+      borderRadius: 9,
+      padding: '10px 15px',
+      fontSize: 13,
+      boxShadow: '0 6px 20px rgba(0,0,0,.22)',
+      maxWidth: 360,
+    },
+  }, flash)
+  return createElement('div', null, fab, panel, toast)
 }
 
 /** Slot registration keeps a stable identity for the seat. */

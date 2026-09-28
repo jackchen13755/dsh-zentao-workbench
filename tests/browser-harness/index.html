@@ -8,6 +8,12 @@
   html, body { margin: 0; height: 100%; background: #0f1012; color: #d0d0d0;
     font: 13px system-ui, -apple-system, "PingFang SC", sans-serif; }
   #hint { padding: 14px 16px; color: #8a8a8a; line-height: 1.7; }
+  /* ?layout=clipped reproduces the shell's overlay: a transformed ancestor
+     becomes the containing block for position:fixed, and overflow:hidden clips
+     anything placed with viewport math. */
+  #clip { position: absolute; left: 240px; top: 160px; width: 520px; height: 360px;
+    border: 1px dashed #4b5563; border-radius: 8px;
+    transform: translateZ(0); overflow: hidden; background: rgba(255,255,255,.02); }
   #hint code { color: #d8d8d8; }
 </style>
 </head>
@@ -20,6 +26,7 @@
   <div id="status">（等待 bundle 挂载…）</div>
 </div>
 <div id="root"></div>
+<div id="clip" style="display:none"><div id="clipRoot"></div></div>
 
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
@@ -41,7 +48,14 @@
 
   // `?state=unauth` renders the not-logged-in panel (the four-strategy report),
   // which is the state the user asked to be shown plainly rather than as "未登录".
-  const UNAUTH = new URLSearchParams(location.search).get('state') === 'unauth'
+  const params = new URLSearchParams(location.search)
+  const UNAUTH = params.get('state') === 'unauth'
+  // Mount inside the transformed/clipped container to reproduce the shell.
+  const CLIPPED = params.get('layout') === 'clipped'
+  if (CLIPPED) {
+    document.getElementById('clip').style.display = 'block'
+    document.getElementById('root').style.display = 'none'
+  }
   const UNAUTH_PROBES = [
     { id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（该标志不可靠，以实测为准）', hint: '守护进程在，但扩展没有在轮询：打开 Chrome 确认 dsh-fetch-page 扩展已启用，然后重试' },
     { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: 'jar 可用（10 个 cookie，3 个会话级），导出时间 2026/9/28 16:37:16', hint: '含会话级 cookie：浏览器一关就失效，需要时重新导出' },
@@ -126,6 +140,7 @@
 <script src="vendor/client.js"></script>
 
 <script>
+  const clipMount = () => (CLIPPED ? 'clipRoot' : 'root')
   const status = document.getElementById('status')
   try {
     if (definition === undefined) throw new Error('bundle 没有调用 window.__ModuleLoader__.load')
@@ -137,7 +152,8 @@
     module.apply(ctx)
     if (window.__PANEL__ === undefined) throw new Error('apply() 没有注册面板组件')
 
-    window.ReactDOM.createRoot(document.getElementById('root')).render(
+    window.__HARNESS__.mountPoint = CLIPPED ? 'clipRoot' : 'root'
+    window.ReactDOM.createRoot(document.getElementById(clipMount())).render(
       window.React.createElement(window.__PANEL__, {}),
     )
     window.__HARNESS__.ready = true
@@ -146,7 +162,7 @@
     // Auto-open the panel so a screenshot shows the real thing, then open the
     // first bug's detail so the card and the plan preview are exercised too.
     window.__HARNESS__.openPanel = async () => {
-      const button = document.querySelector('button[title^="禅道工作台"]')
+      const button = document.querySelector('[data-zentao-entry]')
       if (button === null) throw new Error('找不到悬浮入口按钮')
       button.click()
       await new Promise((resolve) => setTimeout(resolve, 60))
@@ -161,7 +177,10 @@
         }
       }
     }
-    setTimeout(() => { window.__HARNESS__.openPanel().catch((error) => { window.__HARNESS__.error = String(error) }) }, 120)
+    // `?auto=0` keeps the drawer closed so the right-edge tab can be measured.
+    if (params.get('auto') !== '0') {
+      setTimeout(() => { window.__HARNESS__.openPanel().catch((error) => { window.__HARNESS__.error = String(error) }) }, 120)
+    }
   } catch (error) {
     window.__HARNESS__.error = String(error && error.message ? error.message : error)
     status.textContent = '挂载失败：' + window.__HARNESS__.error

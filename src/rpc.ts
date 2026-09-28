@@ -142,6 +142,15 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
           return { ok: true, value: { plan: run.plan, outcome: run.outcome ?? null } }
         }
 
+        case 'setServer': {
+          // The panel's "实例地址" field: lets a fresh install become usable
+          // without editing the profile and restarting the host.
+          const server = typeof body.server === 'string' ? body.server.trim() : ''
+          session.setServer(server)
+          const status = await session.status(true)
+          return { ok: true, value: { status } }
+        }
+
         case 'login': {
           const account = String(body.account ?? '').trim()
           const password = typeof body.password === 'string' ? body.password : ''

@@ -131,9 +131,19 @@ describe('browser bundle', () => {
     expect(typeof outer.type).toBe('function')
     const tree = (outer.type as (props: unknown) => FakeElement)(outer.props)
     expect(react.elements.length).toBeGreaterThan(0)
-    // Collapsed first frame = the draggable floating entry.
+    // Collapsed first frame = the right-edge tab.
     expect(tree.type).toBe('button')
-    expect(String(tree.props.title)).toContain('拖动')
+    expect(String(tree.props.title)).toContain('禅道工作台')
     expect(String(tree.children[0])).toContain('禅')
+    // Regression guard for the reported bug ("入口最大化后看不到了"): the entry
+    // must be anchored with CSS to the viewport edge, never positioned from
+    // window.innerWidth, which drifts whenever the shell is resized or the
+    // overlay's containing block is not the viewport.
+    const style = tree.props.style as Record<string, unknown>
+    expect(style.position).toBe('fixed')
+    expect(style.right).toBe(0)
+    expect(style.top).toBe('50%')
+    expect(String(style.transform)).toContain('translateY(-50%)')
+    expect(style.left).toBeUndefined()
   })
 })

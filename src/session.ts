@@ -14,6 +14,7 @@
  */
 
 import { DEFAULT_BRIDGE_URL, bridgeDaemonStatus, bridgeForward } from './bridge.js'
+import { jarHostsSync } from './cookies.js'
 import { formLogin } from './login.js'
 import { defaultJarPaths, readCookieJar, type CookieJar } from './cookies.js'
 import { sessionExpired } from './parse.js'
@@ -33,6 +34,8 @@ export interface StrategyProbe {
 
 export interface SessionStatus {
   server: string
+  /** Where `server` came from: config / env / jar / runtime / none. */
+  serverSource: 'config' | 'env' | 'jar' | 'runtime' | 'none'
   authenticated: boolean
   strategy?: StrategyId
   probes: StrategyProbe[]
@@ -70,7 +73,9 @@ const BRIDGE_IDLE_HINT = '守护进程在，但扩展没有在轮询：打开 Ch
 const EXPORT_HINT = '可在终端跑 ~/.local/bin/zentao-export-cookies 重新导出（会读 Keychain），或改用浏览器桥'
 
 export class ZenTaoSession {
-  private readonly server: string
+  private server: string
+  /** Where `server` came from, so the panel can say why it is (or is not) set. */
+  private serverSource: 'config' | 'env' | 'jar' | 'runtime' | 'none' = 'none'
   private readonly bridgeUrl: string
   private readonly jarPaths: string[]
   private readonly env: NodeJS.ProcessEnv
@@ -85,7 +90,6 @@ export class ZenTaoSession {
     // Resolve the environment first: `server`/`bridgeUrl` read from it, and an
     // earlier draft assigned it afterwards, which silently ignored ZENTAO_BASE.
     this.env = options.env ?? process.env
-    this.server = normalizeServer(options.server ?? this.env.ZENTAO_BASE ?? '')
     this.bridgeUrl = options.bridgeUrl ?? this.env.DAEMON_URL ?? DEFAULT_BRIDGE_URL
     // Precedence: explicit option → ZENTAO_COOKIE_JAR (the variable this
     // ecosystem's own tools export to) → the conventional default locations.
@@ -97,6 +101,27 @@ export class ZenTaoSession {
       ...(envJar !== '' ? [envJar] : []),
       ...(options.jarPaths ?? defaultJarPaths()),
     ]
+    // Resolution order, most explicit first. The jar fallback is what makes the
+    // plugin work with zero configuration on a machine whose browser cookies were
+    // already exported; the reported source lets the panel explain itself.
+    // It reads `this.jarPaths`, so an explicit `jarPaths` (tests, another
+    // instance) is honoured instead of leaking the default jar's host.
+    const configured = normalizeServer(options.server ?? '')
+    const fromEnv = normalizeServer(this.env.ZENTAO_BASE ?? '')
+    const fromJar = configured === '' && fromEnv === '' ? this.serverFromJar() : ''
+    if (configured !== '') {
+      this.server = configured
+      this.serverSource = 'config'
+    } else if (fromEnv !== '') {
+      this.server = fromEnv
+      this.serverSource = 'env'
+    } else if (fromJar !== '') {
+      this.server = fromJar
+      this.serverSource = 'jar'
+    } else {
+      this.server = ''
+      this.serverSource = 'none'
+    }
     this.probeTtlMs = options.probeTtlMs ?? 30_000
   }
 
@@ -104,6 +129,28 @@ export class ZenTaoSession {
     if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
     if (this.server === '') throw new Error('未配置禅道实例地址：请在插件配置里设置 server（例如 https://zentao.example.com）')
     return `${this.server}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`
+  }
+
+  /** First host found in an existing cookie jar, as an https origin. */
+  private serverFromJar(): string {
+    const host = jarHostsSync([...this.jarPaths])[0]
+    return host === undefined ? '' : `https://${host}`
+  }
+
+  /**
+   * Point the session at an instance at runtime (the panel's "实例地址" field).
+   * Needed because the host process may have neither plugin config nor
+   * ZENTAO_BASE, and asking for a DSH restart just to type an address is absurd.
+   */
+  setServer(server: string): void {
+    this.server = normalizeServer(server)
+    this.serverSource = this.server === '' ? 'none' : 'runtime'
+    this.invalidate()
+  }
+
+  /** Why the instance address is what it is — surfaced by `status()`. */
+  serverOrigin(): 'config' | 'env' | 'jar' | 'runtime' | 'none' {
+    return this.serverSource
   }
 
   /**
@@ -215,6 +262,7 @@ export class ZenTaoSession {
         at: Date.now(),
         status: {
           server: this.server,
+          serverSource: this.serverSource,
           authenticated: true,
           strategy,
           probes: [...attempts, probe],
@@ -226,6 +274,7 @@ export class ZenTaoSession {
 
     const status: SessionStatus = {
       server: this.server,
+      serverSource: this.serverSource,
       authenticated: false,
       probes: attempts.length > 0 ? attempts : await this.probe(),
     }
@@ -245,6 +294,7 @@ export class ZenTaoSession {
     if (this.server === '') {
       const status: SessionStatus = {
         server: '',
+        serverSource: this.serverSource,
         authenticated: false,
         probes: [{
           id: 'bridge',
@@ -293,6 +343,7 @@ export class ZenTaoSession {
       const page = await this.request('/index.php?m=my&f=bug', { method: 'GET' })
       const status: SessionStatus = {
         server: this.server,
+        serverSource: this.serverSource,
         authenticated: true,
         strategy: page.strategy,
         probes: [...probes, {
@@ -308,6 +359,7 @@ export class ZenTaoSession {
       const failureProbes = error instanceof ZenTaoAuthError ? error.status.probes : []
       const status: SessionStatus = {
         server: this.server,
+        serverSource: this.serverSource,
         authenticated: false,
         probes: failureProbes.length > 0 ? [...probes, ...failureProbes] : probes,
       }

@@ -8,16 +8,25 @@
 # any restart.
 set -euo pipefail
 cd "$(dirname "$0")"
-VENDOR_SRC="${REACT_SRC:-$HOME/.dsh/vendor/dsh-zentao/node_modules/react/umd}"
 VERSION="${REACT_VERSION:-18.3.1}"
 
+# Both UMD files come from the registry: the harness must not depend on any
+# third-party plugin tree on this machine (an earlier version read React out of
+# a vendor directory, which made the harness break the moment that plugin was
+# removed). Set REACT_SRC=<dir with react*.production.min.js> to use local copies.
 mkdir -p vendor
-cp -f "$VENDOR_SRC/react.production.min.js" vendor/react.production.min.js
-if [ ! -f vendor/react-dom.production.min.js ]; then
-  echo "vendor/react-dom.production.min.js 不存在，从 registry 取 react-dom@$VERSION 的 UMD…"
-  curl -sSL --max-time 60 "https://registry.npmjs.org/react-dom/-/react-dom-$VERSION.tgz" \
-    | tar -xzO "package/umd/react-dom.production.min.js" > vendor/react-dom.production.min.js
-fi
+fetch_umd() {
+  local pkg="$1" file="$2"
+  if [ -n "${REACT_SRC:-}" ] && [ -f "$REACT_SRC/$file" ]; then
+    cp -f "$REACT_SRC/$file" "vendor/$file"
+    return
+  fi
+  echo "取 $pkg@$VERSION 的 $file…"
+  curl -sSL --max-time 60 "https://registry.npmjs.org/$pkg/-/$pkg-$VERSION.tgz" \
+    | tar -xzO "package/umd/$file" > "vendor/$file"
+}
+[ -f vendor/react.production.min.js ] || fetch_umd react react.production.min.js
+[ -f vendor/react-dom.production.min.js ] || fetch_umd react-dom react-dom.production.min.js
 cp -f ../../lib/client.js vendor/client.js
 ls -la vendor | awk '{print "  ", $5, $9}'
 echo "harness ready: tests/browser-harness/index.html"

@@ -11,6 +11,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -34,6 +35,34 @@ export function defaultJarPaths(): string[] {
     join(homedir(), '.config', 'zentao', 'cookies.txt'),
     join(homedir(), '.dsh', 'storages', 'dsh-zentao-workbench', 'cookies.txt'),
   ]
+}
+
+/**
+ * Domains present in a Netscape jar, without needing to know the host first.
+ *
+ * Exists because the plugin must be usable with **no configuration at all**: a
+ * machine that already exported its browser cookies knows its own instance, and
+ * discovering the address from that jar is what turns "未配置实例地址" into a
+ * working session. Read synchronously so it can run in the session constructor.
+ */
+export function jarHostsSync(paths: string[] = defaultJarPaths()): string[] {
+  const hosts: string[] = []
+  for (const path of paths) {
+    let text: string
+    try {
+      text = readFileSync(path, 'utf8')
+    } catch {
+      continue
+    }
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (line === '' || line.startsWith('#')) continue
+      const domain = line.split('\t')[0]?.trim() ?? ''
+      const host = domain.startsWith('.') ? domain.slice(1) : domain
+      if (host !== '' && host.includes('.') && !hosts.includes(host)) hosts.push(host)
+    }
+  }
+  return hosts
 }
 
 /** Parse a Netscape jar and build the `Cookie:` header for one host. */

@@ -17,6 +17,7 @@ function world(options: { expired?: boolean, postOutcome?: 'ok' | 'alert' } = {}
     if (options.expired === true) {
       throw new ZenTaoAuthError('禅道未登录或不可达', {
         server: 'https://zt.example.test',
+        serverSource: 'config',
         authenticated: false,
         probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '会话已失效（页面被弹回登录页）', hint: '重新登录后重试' }],
       })

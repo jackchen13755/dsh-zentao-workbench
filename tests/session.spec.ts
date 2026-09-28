@@ -1,5 +1,9 @@
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { normalizeServer, renderStatus, ZenTaoSession } from '../src/session.js'
+
+const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 
 const env = (values: Record<string, string>): NodeJS.ProcessEnv => values as NodeJS.ProcessEnv
 
@@ -35,8 +39,21 @@ describe('ZenTaoSession configuration', () => {
     expect(session.url('/x')).toBe('https://explicit.example.com/x')
   })
 
+  it('adopts the instance from an existing cookie jar (zero-config start)', () => {
+    // A machine that already exported its browser cookies knows its instance;
+    // reading the host out of that jar is what makes a fresh install usable.
+    const session = new ZenTaoSession({
+      env: env({}),
+      jarPaths: [join(fixtures, 'cookies.txt')],
+    })
+    expect(session.serverOrigin()).toBe('jar')
+    expect(session.url('/index.php?m=my&f=bug')).toBe('https://zt.example.com/index.php?m=my&f=bug')
+  })
+
   it('fails loudly when no instance is configured', async () => {
-    const session = new ZenTaoSession({ env: env({}) })
+    // Isolate from this machine's real jar: the jar fallback would otherwise
+    // (correctly) supply an address, and there would be nothing to fail on.
+    const session = new ZenTaoSession({ env: env({}), jarPaths: ['/nonexistent/jar.txt'] })
     expect(() => session.url('/x')).toThrow(/未配置禅道实例地址/)
     const status = await session.status(true)
     expect(status.authenticated).toBe(false)

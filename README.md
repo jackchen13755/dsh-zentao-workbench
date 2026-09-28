@@ -74,6 +74,20 @@ zentao login --account A          # 口令读 ZENTAO_PASSWORD 或 --password-std
 CLI 管理的 profile 用 `dsh plugin --profile web add <dir>`；`desktop` profile 由 Electron 独占，
 按 `package.json` 的 `dependencies` 加 `link:` + `cordis.patch.yml` 里加一行（`name: dsh-zentao-workbench`）接线，重启生效。
 
+## 写路径怎么验证（不改动任何单据）
+
+所有写路径默认只跑 `dryRun`。要证明真实 POST 也能工作，用这个探针 —— 它走生产代码
+路径（`planResolve` → `submitResolve`），但**故意让服务端必拒**：删掉必填的
+`changeImpact` 并破坏 `uid`，所以即便这个版本忽略 uid 校验，缺必填也无法被接受。
+
+```sh
+node scripts/probe-write-path.mjs 55036        # 需要会话（ZENTAO_* 环境变量或 cookie jar）
+```
+
+实测结果（真单 55036 / 55035）：`ok=false`、服务端原文「『代码变更影响范围』不能为空。」、
+回读状态与提交前一致 → **单据未被改动**，退出码 0。
+这条同时独立证实了本插件要修的那个 retry 根源：服务端在缺 `changeImpact` 时确实会拒绝。
+
 ## 本机注意
 
 DSH 自带的 node（`~/.dsh/dsh-runtimes/*/dependencies/node`）带签名且开启 library validation，

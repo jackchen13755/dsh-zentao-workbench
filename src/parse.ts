@@ -172,25 +172,56 @@ export function parseBugList(html: string): BugRow[] {
   for (const row of table[2]?.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g) ?? []) {
     const cells = [...(row[1] ?? '').matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1] ?? '')
     if (cells.length < 7) continue
+
+    // Locate cells by their markers instead of by index: the "my bugs" table and
+    // a project's bug table have different column sets (measured: the project one
+    // has no 类型 column and an extra trailing actions column, which shifted every
+    // field when this parser indexed positions).
+    // The *view* link specifically: rows also carry `f=assignTo&bugID=…` links
+    // (and the id cell has its own), which would otherwise be mistaken for the title.
+    // Among the cells that link to the bug view, the title is the one with the
+    // longest anchor text — the id cell links to the same place but shows `38727`.
+    let titleIndex = -1
+    let longest = 0
+    cells.forEach((cell, index) => {
+      const m = /<a\b[^>]*\bhref=(['"])[^'"]*m=bug&f=view&bugID=\d+[^'"]*\1[^>]*>([\s\S]*?)<\/a>/.exec(cell)
+      if (m === null) return
+      const length = decodeEntities((m[2] ?? '').replace(/<[^>]*>/g, ' ')).trim().length
+      if (length > longest || (length === longest && titleIndex === -1)) {
+        longest = length
+        titleIndex = index
+      }
+    })
+    if (titleIndex < 0) continue
     const id = (cells[0]?.match(/name=(['"])bugIDList\[\]\1[^>]*\bvalue=(['"])(\d+)\2/) ?? [])[3]
       ?? (cells[0]?.match(/\bvalue=(['"])(\d+)\1/) ?? [])[2]
+      ?? (/bugID=(\d+)/.exec(cells[titleIndex] ?? '') ?? [])[1]
     if (!id) continue
-    const anchor = cells[4]?.match(/<a\b[^>]*\bhref=(['"])([^'"]+)\1[^>]*>([\s\S]*?)<\/a>/)
+
+    const severityCell = cells.find((cell) => /label-severity/.test(cell)) ?? cells[1] ?? ''
+    const priCell = cells.find((cell) => /label-pri/.test(cell)) ?? cells[2] ?? ''
+    const assigneeCell = cells.find((cell) => /icon-hand-right/.test(cell)) ?? ''
+    const anchor = cells[titleIndex]?.match(/<a\b[^>]*\bhref=(['"])([^'"]+)\1[^>]*>([\s\S]*?)<\/a>/)
+    // 类型 sits between 优先级 and the title, and only exists in the my-bugs table.
+    const typeCell = titleIndex >= 4 ? (cells[titleIndex - 1] ?? '') : ''
+    // 解决者 / 方案 are the two columns after 指派给, in both table shapes.
+    const assigneeAt = cells.findIndex((cell) => /icon-hand-right/.test(cell))
+    const tail = assigneeAt < 0 ? [] : cells.slice(assigneeAt + 1)
+
     rows.push({
       id,
-      severity: attr(cells[1] ?? '', 'title') || decodeEntities(cells[1] ?? ''),
-      severityLevel: severityLevelOf(cells[1] ?? ''),
-      pri: attr(cells[2] ?? '', 'title') || decodeEntities(cells[2] ?? ''),
-      type: attr(cells[3] ?? '', 'title') || decodeEntities(cells[3] ?? ''),
-      title: decodeEntities(anchor?.[3] ?? cells[4] ?? ''),
-      openedBy: decodeEntities(cells[5] ?? ''),
-      assignedTo: attr(cells[6] ?? '', 'title') || decodeEntities(cells[6] ?? ''),
+      severity: attr(severityCell, 'title') || decodeEntities(severityCell.replace(/<[^>]*>/g, ' ')).trim(),
+      severityLevel: severityLevelOf(severityCell),
+      pri: attr(priCell, 'title') || decodeEntities(priCell.replace(/<[^>]*>/g, ' ')).trim(),
+      type: attr(typeCell, 'title') || decodeEntities(typeCell.replace(/<[^>]*>/g, ' ')).trim(),
+      title: decodeEntities(anchor?.[3] ?? cells[titleIndex] ?? '').replace(/\s+/g, ' ').trim(),
+      openedBy: decodeEntities((cells[titleIndex + 1] ?? '').replace(/<[^>]*>/g, ' ')).trim(),
+      assignedTo: attr(assigneeCell, 'title') || decodeEntities(assigneeCell.replace(/<[^>]*>/g, ' ')).trim(),
       href: anchor?.[2] ?? '',
-      // The list page has no dedicated status column: an open bug leaves both
-      // 解决 (cells[7]) and 方案 (cells[8]) empty, so their emptiness is the
-      // only open/resolved signal available without a second request.
-      resolvedBy: decodeEntities(cells[7] ?? ''),
-      resolution: decodeEntities(cells[8] ?? ''),
+      // No dedicated status column: an open bug leaves 解决 and 方案 empty, so
+      // their emptiness is the only open/resolved signal available here.
+      resolvedBy: decodeEntities((tail[0] ?? '').replace(/<[^>]*>/g, ' ')).trim(),
+      resolution: decodeEntities((tail[1] ?? '').replace(/<[^>]*>/g, ' ')).trim(),
     })
   }
   return rows
@@ -208,6 +239,34 @@ export function parseListTotal(html: string): number | null {
   if (!m?.[2]) return null
   const value = Number(m[2])
   return Number.isFinite(value) ? value : null
+}
+
+// --- project list -----------------------------------------------------------
+
+export interface ProjectRow {
+  id: string
+  name: string
+}
+
+/**
+ * `GET /index.php?m=project&f=index` → the projects this account can see.
+ *
+ * Measured markup: `<li projectID='194'> … <a … data-toggle="tab">划线价UI走查</a>`.
+ * The project's *name* is not on its `projectID=` links (those are tab labels
+ * like 任务/看板), so the tab anchor is what has to be read.
+ */
+export function parseProjectList(html: string): ProjectRow[] {
+  const rows: ProjectRow[] = []
+  for (const m of html.matchAll(/<li[^>]*projectID=['"]?(\d+)['"]?[^>]*>([\s\S]{0,400}?)<\/li>/g)) {
+    const id = m[1]
+    if (id === undefined) continue
+    const name = decodeEntities(
+      /data-toggle=['"]tab['"][^>]*>([\s\S]{0,80}?)<\/a>/.exec(m[2] ?? '')?.[1]?.replace(/<[^>]*>/g, '') ?? '',
+    ).trim()
+    if (name === '' || rows.some((row) => row.id === id)) continue
+    rows.push({ id, name })
+  }
+  return rows
 }
 
 // --- project task list ------------------------------------------------------
@@ -276,6 +335,14 @@ export interface BugDetail {
   /** 解决版本 / 解决方案 as shown on the detail page — non-empty once resolved. */
   resolvedBuild: string
   solution: string
+  /** 所属产品 label (the <title> product is a fallback when this is empty). */
+  productLabel: string
+  /** 相关需求 as shown, e.g. `#3982 GReAT优化`; empty when the bug has none. */
+  story: string
+  /** `storyID` behind that link, for building a URL; empty when absent. */
+  storyID: string
+  /** 所属项目 label — empty for bugs that are not project-scoped. */
+  projectLabel: string
 }
 
 /** Ported status probe: `<th>Bug状态</th><td><span>…</span></td>`. */
@@ -294,9 +361,17 @@ export function lastResolvedBuild(html: string): string {
   return build
 }
 
+/**
+ * Text of a `<th>label</th><td>value</td>` row on the detail page.
+ *
+ * The `<th>` may carry attributes (measured: `所属产品` is `<th class='w-70px'>`,
+ * which an attribute-less pattern silently skipped), and the cell often wraps
+ * its value in a link — so tags are stripped and the display text is returned.
+ */
 function labelledField(html: string, label: string): string {
-  const span = html.match(new RegExp(`<th>\\s*${label}\\s*</th>\\s*<td[^>]*>([\\s\\S]{0,400}?)</td>`))
-  return span ? decodeEntities(span[1] ?? '') : ''
+  const span = html.match(new RegExp(`<th(?:\\s[^>]*)?>\\s*${label}\\s*</th>\\s*<td[^>]*>([\\s\\S]{0,400}?)</td>`))
+  if (!span) return ''
+  return decodeEntities(String(span[1] ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim()
 }
 
 export function parseBugView(html: string, bugID: string): BugDetail {
@@ -320,6 +395,14 @@ export function parseBugView(html: string, bugID: string): BugDetail {
     assignedTo: assignee,
     resolvedBuild: labelledField(html, '解决版本'),
     solution: labelledField(html, '解决方案'),
+    // 需求/项目 live on the detail page only — the list markup has no such
+    // columns, which is why the panel can show them but not filter by them.
+    productLabel: labelledField(html, '所属产品'),
+    story: labelledField(html, '相关需求'),
+    storyID: /storyID=(\d+)/.exec(
+      new RegExp(`<th[^>]*>\\s*相关需求\\s*</th>\\s*<td[^>]*>([\\s\\S]{0,300}?)</td>`).exec(html)?.[1] ?? '',
+    )?.[1] ?? '',
+    projectLabel: labelledField(html, '所属项目'),
   }
 }
 

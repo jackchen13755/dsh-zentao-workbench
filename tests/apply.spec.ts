@@ -72,6 +72,7 @@ describe('apply()', () => {
     expect(world.tools).toEqual([
       'zentao_session_status',
       'zentao_my_bugs',
+      'zentao_projects',
       'zentao_tasks',
       'zentao_bug_context',
       'zentao_resolve_bug',
@@ -102,14 +103,14 @@ describe('apply()', () => {
     // Same shape as the live host: connect lookup throws when read strictly.
     const world = fakeCordis({ getThrows: true })
     apply(world.ctx as never)
-    expect(world.tools).toHaveLength(5)
+    expect(world.tools).toHaveLength(6)
     expect(world.routes).toEqual(['/api/zentao'])
   })
 
   it('stays usable without a connection service (headless/TUI)', () => {
     const world = fakeCordis({ withConnection: false })
     apply(world.ctx as never)
-    expect(world.tools).toHaveLength(5)
+    expect(world.tools).toHaveLength(6)
     expect(world.routes).toEqual([])
     expect(world.channels).toEqual([])
     expect(world.warnings.join(' ')).toContain('未注册')
@@ -118,7 +119,7 @@ describe('apply()', () => {
   it('falls back to a direct registration when the host has no ctx.inject', () => {
     const world = fakeCordis({ withInject: false, getThrows: false })
     apply(world.ctx as never)
-    expect(world.tools).toHaveLength(5)
+    expect(world.tools).toHaveLength(6)
     // Without `inject` the connection property is still usable…
     expect(world.routes).toEqual(['/api/zentao'])
   })
@@ -126,7 +127,7 @@ describe('apply()', () => {
   it('survives a host with neither inject nor a connection service', () => {
     const world = fakeCordis({ withInject: false, withConnection: false, getThrows: true })
     expect(() => apply(world.ctx as never)).not.toThrow()
-    expect(world.tools).toHaveLength(5)
+    expect(world.tools).toHaveLength(6)
     expect(world.routes).toEqual([])
     expect(world.channels).toEqual([])
   })

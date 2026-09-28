@@ -32,7 +32,8 @@ interface Config {
   hasEnvCookie: boolean
   jarPaths: string[]
 }
-interface BugsPayload { bugs: BugRow[], total: number, truncated?: boolean, via: string }
+interface BugsPayload { bugs: BugRow[], total: number, truncated?: boolean, via: string, scope?: 'mine' | 'project', projectName?: string }
+interface ProjectRow { id: string, name: string }
 interface BugRow {
   id: string
   severity: string
@@ -47,7 +48,12 @@ interface BugRow {
 }
 interface TaskRow { id: string, name: string, status: string, assignedTo: string, href: string }
 interface BugContext {
-  bug: { id: string, title: string, product: string, status: string, assignedTo: string, url: string, severity?: string, severityLevel?: number | null }
+  bug: {
+    id: string, title: string, product: string, status: string, assignedTo: string, url: string
+    severity?: string, severityLevel?: number | null
+    /** Detail-page fields (may be absent on an older host build). */
+    productLabel?: string, story?: string, storyID?: string, projectLabel?: string
+  }
   resolve: {
     uid: string
     fields: Array<{ name: string, label: string, required: boolean, limit?: number }>
@@ -165,6 +171,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [only, setOnly] = useState<'all' | 'open'>('open')
   /** Server-side sort; values are whitelisted host-side (they reach SQL). */
   const [orderBy, setOrderBy] = useState('id_desc')
+  /** Local keyword filter over the fetched page (id/title/type/severity/assignee/方案). */
+  const [search, setSearch] = useState('')
+  const [scope, setScope] = useState<'mine' | 'project'>('mine')
+  const [projects, setProjects] = useState<ProjectRow[]>([])
+  const [projectID, setProjectID] = useState('')
   const [intervalMin, setIntervalMin] = useState(5)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -173,7 +184,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [flash, setFlash] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [tab, setTab] = useState<'bugs' | 'tasks'>('bugs')
-  const [bugsTotal, setBugsTotal] = useState<{ total: number, truncated: boolean }>({ total: 0, truncated: false })
+  const [bugsTotal, setBugsTotal] = useState<{ total: number, truncated: boolean, projectName?: string }>({ total: 0, truncated: false })
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [taskNote, setTaskNote] = useState('')
   const [serverDraft, setServerDraft] = useState('')
@@ -202,16 +213,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const refreshBugs = useCallback(async (force = false) => {
     setBusy('bugs')
     try {
-      const value = await call('listBugs', { limit: 30, only, orderBy, refresh: force }) as BugsPayload
+      const value = await call('listBugs', { limit: 30, only, orderBy, scope, ...(projectID === '' ? {} : { projectID }), refresh: force }) as BugsPayload
       setBugs(value.bugs)
-      setBugsTotal({ total: value.total, truncated: value.truncated === true })
+      setBugsTotal({ total: value.total, truncated: value.truncated === true, ...(value.projectName === undefined ? {} : { projectName: value.projectName }) })
       setError('')
     } catch (problem) {
       setError((problem as Error).message)
     } finally {
       setBusy('')
     }
-  }, [call, only, orderBy])
+  }, [call, only, orderBy, scope, projectID])
 
   /**
    * One refresh that covers everything currently visible: the session status,
@@ -226,7 +237,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       const next = { ...(status.config ?? status), probes: status.probes ?? status.config?.probes ?? [] } as Config
       setConfig(next)
       if (next.authenticated) {
-        const listed = await call('listBugs', { limit: 30, only, orderBy, refresh: force }) as BugsPayload
+        const listed = await call('listBugs', { limit: 30, only, orderBy, scope, ...(projectID === '' ? {} : { projectID }), refresh: force }) as BugsPayload
         setBugs(listed.bugs)
         if (tab === 'tasks') {
           const taskValue = await call('listTasks', { limit: 30 }) as { tasks: TaskRow[], note: string }
@@ -248,7 +259,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     } finally {
       setBusy('')
     }
-  }, [call, only, orderBy, tab, selected, plan])
+  }, [call, only, orderBy, scope, projectID, tab, selected, plan])
 
   const refreshTasks = useCallback(async () => {
     setBusy('tasks')
@@ -266,6 +277,21 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
 
   useEffect(() => { void refreshStatus(true) }, [refreshStatus])
 
+  // Projects are only needed when the user picks that scope, so they load lazily.
+  useEffect(() => {
+    if (scope !== 'project' || projects.length > 0) return undefined
+    let cancelled = false
+    void (async () => {
+      try {
+        const value = await call('listProjects', {}) as { projects: ProjectRow[] }
+        if (!cancelled) setProjects(value.projects)
+      } catch (problem) {
+        if (!cancelled) setError((problem as Error).message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [scope, projects.length, call])
+
   // Changing the filter or the sort must re-read: the loading effect below only
   // runs its initial fetch once (`lastUpdated` is already set afterwards), so
   // without this the list kept showing the previous order — caught by the
@@ -274,7 +300,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     if (!open || config?.authenticated !== true) return undefined
     void refreshBugs(true)
     return undefined
-  }, [open, config?.authenticated, only, orderBy, refreshBugs])
+  }, [open, config?.authenticated, only, orderBy, scope, projectID, refreshBugs])
 
   useEffect(() => {
     if (!open || config?.authenticated !== true) return undefined
@@ -290,6 +316,17 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     const timer = window.setTimeout(() => setFlash(''), 2400)
     return () => window.clearTimeout(timer)
   }, [flash])
+
+  /** Keyword filter over the fetched page — instant, no server round trip. */
+  const visibleBugs = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (query === '') return bugs
+    const terms = query.split(/\s+/)
+    return bugs.filter((bug) => {
+      const haystack = [bug.id, bug.title, bug.type, bug.severity, bug.assignedTo, bug.resolution].join(' ').toLowerCase()
+      return terms.every((term) => haystack.includes(term))
+    })
+  }, [bugs, search])
 
   const openDetail = useCallback(async (bugID: string) => {
     setBusy(`detail:${bugID}`)
@@ -495,7 +532,41 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
     }
 
+    if (tab === 'bugs') body.push(createElement('div', { key: 'search', style: { display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px 0' } },
+      createElement('input', {
+        'data-zentao-search': '1',
+        // Local filter over the page already fetched: the list endpoint rejects
+        // server-side keyword params (measured: keywords=/title= → 0 rows).
+        placeholder: '搜索 单号 / 标题 / 类型 / 级别 / 指派给…',
+        value: search,
+        onChange: (event: { target: { value: string } }) => setSearch(event.target.value),
+        style: { flex: 1, minWidth: 0 },
+      }),
+      search.trim() === ''
+        ? null
+        : createElement('button', { type: 'button', onClick: () => setSearch(''), style: { cursor: 'pointer' } }, '清空')))
+
     if (tab === 'bugs') body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
+      createElement('select', {
+        'data-zentao-scope': '1',
+        title: '范围：我的 Bug，或某个项目里的 Bug',
+        value: scope,
+        onChange: (event: { target: { value: string } }) => setScope(event.target.value === 'project' ? 'project' : 'mine'),
+        style: { minWidth: 96 },
+      },
+        createElement('option', { value: 'mine' }, '我的 Bug'),
+        createElement('option', { value: 'project' }, '项目')),
+      scope === 'project'
+        ? createElement('select', {
+            'data-zentao-project': '1',
+            title: '选择项目（列表来自禅道项目索引）',
+            value: projectID,
+            onChange: (event: { target: { value: string } }) => setProjectID(event.target.value),
+            style: { flex: 1, minWidth: 120 },
+          },
+          createElement('option', { value: '' }, projects.length === 0 ? '（加载项目…）' : '选择项目…'),
+          ...projects.map((project) => createElement('option', { key: project.id, value: project.id }, `${project.name}（${project.id}）`)))
+        : null,
       createElement('select', { value: only, onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'), style: { flex: 1, minWidth: 88 } },
         createElement('option', { value: 'open' }, '未解决'),
         createElement('option', { value: 'all' }, '全部')),
@@ -520,9 +591,12 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('option', { value: '15' }, '15 分钟'),
         createElement('option', { value: '30' }, '30 分钟'),
         createElement('option', { value: '0' }, '不自动')),
-      bugsTotal.truncated
-        ? createElement('span', { style: { fontSize: 11, color: TOKEN.dim } }, `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}`)
-        : null,
+      createElement('span', { style: { fontSize: 11, color: TOKEN.dim } },
+        [
+          scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
+          search.trim() === '' ? '' : `命中 ${visibleBugs.length}/${bugs.length}`,
+          bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
+        ].filter((part) => part !== '').join(' · ')),
       createElement('button', {
         type: 'button',
         'data-zentao-action': 'refresh',
@@ -591,7 +665,19 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('div', { style: { padding: '10px 12px' } },
         createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
           severityBadge(selected.bug.severity || '', selected.bug.severityLevel),
-          createElement('span', null, `产品 ${selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`)),
+          createElement('span', null, `产品 ${selected.bug.productLabel || selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`)),
+        (selected.bug.story ?? '') === ''
+          ? createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2 } }, '相关需求：无（列表页没有需求列，只有详情页有）')
+          : createElement('div', { style: { fontSize: 11, marginTop: 2 } },
+              createElement('span', { style: { color: TOKEN.dim } }, '相关需求：'),
+              createElement('a', {
+                href: (selected.bug.storyID ?? '') === ''
+                  ? undefined
+                  : absoluteUrl(config?.server ?? '', `/index.php?m=story&f=view&storyID=${selected.bug.storyID}`),
+                target: '_blank',
+                rel: 'noreferrer',
+                style: { color: TOKEN.accent },
+              }, selected.bug.story ?? '')),
         createElement('div', { style: { fontSize: 12 } },
           `必填：${selected.resolve.fields.filter((field) => field.required).map((field) => field.label).join('、')}`),
         createElement('div', { style: { fontSize: 12, color: TOKEN.dim, marginTop: 2 } },
@@ -614,6 +700,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           ...ROLE_PRESETS.map((role) => createElement('button', {
             key: role.key,
             type: 'button',
+            // Each one opens a NEW conversation in the current workspace and sends
+            // the bug reference plus that role's preset prompt — nothing is written
+            // to ZenTao.
+            title: `新建一个会话，把这条 Bug 的引用 + 「${role.label}」视角的预设提示词发过去（只开对话，不改单）`,
             style: { cursor: 'pointer' },
             onClick: async () => {
               try {
@@ -632,7 +722,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           'data-zentao-list': '1',
           style: { position: 'absolute', inset: 0, overflowY: 'auto' },
         },
-      ...bugs.map((bug) => createElement('div', {
+      ...visibleBugs.map((bug) => createElement('div', {
         key: bug.id,
         'data-zentao-bug': bug.id,
         draggable: true,

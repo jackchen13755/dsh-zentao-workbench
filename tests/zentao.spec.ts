@@ -30,6 +30,45 @@ describe('normalizeOrderBy', () => {
   })
 })
 
+describe('myBugs scope', () => {
+  it('uses the project bug list, with projectID before orderBy', async () => {
+    const paths: string[] = []
+    const session = fakeSession((path) => {
+      paths.push(path)
+      return bugListPage([bugRow({ id: '1', title: 'a' })])
+    })
+    const result = await new ZentaoWorkbench(session).myBugs({ scope: 'project', projectID: '187', orderBy: 'severity_asc' })
+    // Same rule as the my-bugs URL: the scope parameter must precede orderBy,
+    // otherwise the instance answers an empty list (measured on both shapes).
+    expect(paths[0]).toBe('/index.php?m=project&f=bug&projectID=187&orderBy=severity_asc')
+    expect(result.scope).toBe('project')
+    expect(result.projectID).toBe('187')
+  })
+
+  it('falls back to my bugs when no project is chosen', async () => {
+    const paths: string[] = []
+    const session = fakeSession((path) => {
+      paths.push(path)
+      return bugListPage([bugRow({ id: '1', title: 'a' })])
+    })
+    const result = await new ZentaoWorkbench(session).myBugs({ scope: 'project' })
+    expect(paths[0]).toContain('m=my&f=bug')
+    expect(result.scope).toBe('mine')
+  })
+
+  it('does not serve a cached project page for a "mine" request', async () => {
+    const paths: string[] = []
+    const session = fakeSession((path) => {
+      paths.push(path)
+      return bugListPage([bugRow({ id: '1', title: 'a' })])
+    })
+    const workbench = new ZentaoWorkbench(session)
+    await workbench.myBugs({ scope: 'project', projectID: '187' })
+    await workbench.myBugs({})
+    expect(paths).toHaveLength(2)
+  })
+})
+
 describe('myBugs ordering', () => {
   it('sends the order to the server and echoes it back', async () => {
     const paths: string[] = []

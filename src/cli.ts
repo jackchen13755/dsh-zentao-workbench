@@ -21,7 +21,7 @@ import { resolveBug, ZentaoWorkbench } from './zentao.js'
 const VALUE_FLAGS = new Set([
   'server', 'limit', 'only', 'build', 'history', 'resolution', 'reason',
   'detail', 'impact', 'comment', 'assigned-to', 'in-charged-by', 'cookie-jar', 'bridge-url',
-  'account', 'save-jar', 'project', 'host-url', 'order-by',
+  'account', 'save-jar', 'project', 'host-url', 'order-by', 'scope',
 ])
 const BOOLEAN_FLAGS = new Set(['json', 'refresh', 'dry-run', 'force', 'help', 'password-stdin'])
 
@@ -29,7 +29,9 @@ const USAGE = `用法：
   zentao status   [--json]
   zentao bugs     [--limit 30] [--only all|open|resolved] [--refresh] [--json]
                   [--order-by id_desc|openedDate_desc|severity_asc|pri_asc|…]
+                  [--scope mine|project --project <id>]  （按项目看 Bug）
   zentao tasks    [--project <id>] [--limit 30] [--json]
+  zentao projects                     （列出可见项目 id + 名称）
   zentao context  <bugID> [--build X] [--history 5] [--refresh] [--json]
   zentao doctor   [--host-url http://127.0.0.1:19387]
                                    （判定面板通道路由是否真的注册；面板报 405 时先跑它）
@@ -151,6 +153,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           only: (flag(parsed, 'only') ?? 'all') as 'all' | 'open' | 'resolved',
           refresh: parsed.flags.get('refresh') === true,
           orderBy: flag(parsed, 'order-by'),
+          scope: flag(parsed, 'scope') === 'project' ? 'project' : 'mine',
+          projectID: flag(parsed, 'project'),
         })
         if (asJson) {
           io.out(`${JSON.stringify(result, null, 2)}\n`)
@@ -233,6 +237,17 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         }
         const status = await session.status(true)
         io.out(`${renderStatus(status)}\n`)
+        return 0
+      }
+
+      case 'projects': {
+        const result = await workbench.projects()
+        if (asJson) {
+          io.out(`${JSON.stringify(result, null, 2)}\n`)
+          return 0
+        }
+        io.out(`项目（${result.projects.length} 个，经「${result.via}」）\n`)
+        for (const project of result.projects) io.out(`  ${project.id}  ${project.name}\n`)
         return 0
       }
 

@@ -60,7 +60,15 @@ function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true,
 
   const slots: unknown[] = []
   const refs: unknown[] = []
+  const memoSlots: Array<{ value: unknown, deps: readonly unknown[] } | undefined> = []
   const effects: Array<{ deps?: readonly unknown[], cleanup?: void | (() => void), run: () => void | (() => void) }> = []
+  /**
+   * Previous deps, kept OUT of the effect records: those records are rebuilt on
+   * every render, so storing `previousDeps` on them lost the comparison and made
+   * every effect re-run on every render (which the panel's loaders multiplied
+   * into a pile of extra listBugs calls).
+   */
+  const effectDeps: Array<readonly unknown[] | undefined> = []
   let cursor = 0
   let effectCursor = 0
   let dirty = false
@@ -83,13 +91,26 @@ function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true,
       if (!(index in refs)) refs[index] = { current: initial }
       return refs[index] as { current: T }
     },
-    useCallback<T>(callback: T): T {
-      cursor++ // keeps slot alignment with useRef/useState in the same component
-      return callback
+    /**
+     * Memoised like React: returning a fresh function every render made any
+     * effect that depends on a callback re-run on every render, which showed up
+     * as +10 surprise listBugs calls in a test. Deps are compared shallowly.
+     */
+    useCallback<T>(callback: T, deps?: readonly unknown[]): T {
+      const index = cursor++
+      const slot = memoSlots[index]
+      const changed = slot === undefined || deps === undefined
+        || slot.deps.length !== deps.length || deps.some((value, i) => value !== slot.deps[i])
+      if (changed) memoSlots[index] = { value: callback, deps: deps ?? [] }
+      return memoSlots[index]!.value as T
     },
-    useMemo<T>(factory: () => T): T {
-      cursor++
-      return factory()
+    useMemo<T>(factory: () => T, deps?: readonly unknown[]): T {
+      const index = cursor++
+      const slot = memoSlots[index]
+      const changed = slot === undefined || deps === undefined
+        || slot.deps.length !== deps.length || deps.some((value, i) => value !== slot.deps[i])
+      if (changed) memoSlots[index] = { value: factory(), deps: deps ?? [] }
+      return memoSlots[index]!.value as T
     },
     useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void {
       const index = effectCursor++
@@ -138,17 +159,17 @@ function mount(rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true,
     const outer = component!({}) as Element
     const tree = (outer.type as (props: unknown) => unknown)(outer.props) as Element
     // Run effects whose deps changed (first render always runs).
-    for (const effect of effects) {
-      if (effect === undefined) continue
-      const previous = (effect as { previousDeps?: readonly unknown[] }).previousDeps
+    effects.forEach((effect, index) => {
+      if (effect === undefined) return
+      const previous = effectDeps[index]
       const changed = previous === undefined || effect.deps === undefined
         || effect.deps.length !== previous.length
-        || effect.deps.some((value, index) => value !== previous[index])
-      if (!changed) continue
+        || effect.deps.some((value, i) => value !== previous[i])
+      if (!changed) return
       effect.cleanup?.()
       effect.cleanup = effect.run() ?? undefined
-      ;(effect as { previousDeps?: readonly unknown[] }).previousDeps = effect.deps
-    }
+      effectDeps[index] = effect.deps
+    })
     return tree
   }
 
@@ -313,6 +334,46 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     }
     // The whole point of the request: different levels must look different.
     expect(badges[0]!.background).not.toBe(badges[1]!.background)
+  })
+
+  it('filters the fetched page locally and switches scope server-side', async () => {
+    const scopeCalls: unknown[] = []
+    const rpc = async (endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown }> => {
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listProjects') {
+        return { ok: true, value: { projects: [{ id: '187', name: 'Upsell STUAT' }], via: 'bridge', url: '', fetchedAt: '' } }
+      }
+      if (endpoint === 'listBugs') {
+        scopeCalls.push((payload as { scope?: unknown }).scope)
+        return { ok: true, value: { bugs: [
+          { id: '55036', title: '查询条件location浮层问题', severity: '主要', severityLevel: 3, pri: '3', type: '需求逻辑问题', assignedTo: 'dev', resolution: '', href: '/x' },
+          { id: '55035', title: '支付回调超时', severity: '致命', severityLevel: 1, pri: '1', type: '代码错误', assignedTo: 'dev2', resolution: '', href: '/x' },
+        ], total: 2, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    // 本地搜索：单号/级别都能命中，且不产生新的服务端调用
+    const before = scopeCalls.length
+    const input = find(tree, (element) => element.props['data-zentao-search'] === '1')!
+    ;(input.props.onChange as (event: unknown) => void)({ target: { value: '55035' } })
+    tree = await settle()
+    expect(scopeCalls.length).toBe(before)
+    const titlesAfterSearch = textOf(tree).join(' ')
+    expect(titlesAfterSearch).toContain('支付回调超时')
+    expect(titlesAfterSearch).not.toContain('查询条件location浮层问题')
+
+    // 切到项目范围 → 服务端重取，并带上 scope=project
+    const scopeSelect = find(tree, (element) => element.props['data-zentao-scope'] === '1')!
+    ;(scopeSelect.props.onChange as (event: unknown) => void)({ target: { value: 'project' } })
+    await settle()
+    expect(scopeCalls).toContain('project')
   })
 
   it('opens a detail card when a row is clicked', async () => {

@@ -5,6 +5,7 @@ import {
   parseBugView,
   parseHistories,
   parseListTotal,
+  parseProjectList,
   severityLevelOf,
   parseResolveForm,
   parseTaskList,
@@ -135,6 +136,24 @@ describe('severity level', () => {
       bugRow({ id: '2', title: 'b', severity: '次要', severityLevel: 4 }),
     ])
     expect(parseBugList(html).map((row) => row.severityLevel)).toEqual([3, 4])
+  })
+})
+
+describe('parseProjectList', () => {
+  it('reads id + name from the tab anchor, not from the projectID tab labels', () => {
+    // Real markup: the projectID= links carry tab labels (任务/看板), so the name
+    // has to come from the tab anchor inside the <li>.
+    const html = `<ul class="nav"><li projectID='194'> <a href="###" data-target="#tab3Content194" data-toggle="tab">划线价UI走查</a>
+      <a href='/index.php?m=project&f=task&projectID=194' class='btn-view' title=任务列表></a> </li>
+      <li projectID='213'> <a href="###" data-toggle="tab">SPMS UAT</a> </li></ul>`
+    expect(parseProjectList(html)).toEqual([
+      { id: '194', name: '划线价UI走查' },
+      { id: '213', name: 'SPMS UAT' },
+    ])
+  })
+
+  it('returns nothing when there is no project list', () => {
+    expect(parseProjectList('<html><body>无</body></html>')).toEqual([])
   })
 })
 

@@ -101,10 +101,12 @@ export function createTools(deps: ToolDeps): unknown[] {
 
     defineTool({
       name: 'zentao_my_bugs',
-      description: '列出禅道「我的 Bug」（/index.php?m=my&f=bug）。返回结构化字段（ID/级别/优先级/类型/标题/创建人/指派给/是否已解决），不回传 HTML。',
+      description: '列出 Bug：默认「我的 Bug」（/index.php?m=my&f=bug），可改按项目（scope=project + projectID，项目列表用 zentao_projects）。返回结构化字段（ID/级别/优先级/类型/标题/创建人/指派给/是否已解决），不回传 HTML。',
       parameters: {
         limit: { type: 'number', description: '返回条数上限，默认 30，最大 200' },
         only: { type: 'string', enum: ['all', 'open', 'resolved'], description: '筛选：all（默认）/ open 仅未解决 / resolved 仅已解决（依据列表页的「解决/方案」两列）' },
+        scope: { type: 'string', enum: ['mine', 'project'], description: '范围：mine（默认，我的 Bug）/ project（指定项目的 Bug，需同时给 projectID）' },
+        projectID: { type: 'string', description: '项目 ID（scope=project 时必填）；先用 zentao_projects 取 id 与名称' },
         orderBy: { type: 'string', description: '排序，形如 <字段>_<asc|desc>。常用：id_desc（默认，最新在前）、openedDate_desc（按创建时间）、severity_asc（级别高→低）、pri_asc（优先级高→低）；可用字段 id/severity/pri/openedDate/lastEditedDate/assignedTo/status/resolution' },
         refresh: { type: 'boolean', description: '绕过 60 秒缓存' },
       },
@@ -113,15 +115,39 @@ export function createTools(deps: ToolDeps): unknown[] {
         render: (_args, value) => text(String((value as { text?: string }).text ?? '')),
       },
       async execute(args): Promise<{ text: string }> {
-        const a = args as { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string }
+        const a = args as { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string, scope?: 'mine' | 'project', projectID?: string }
         try {
           const result = await workbench.myBugs(a)
-          const lines = [`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}`]
+          const where = result.scope === 'project' ? `项目 ${result.projectName ?? ''}（#${result.projectID ?? '?'}）的 Bug` : '我的 Bug'
+          const lines = [`${where}（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}`]
           for (const bug of result.bugs) {
             lines.push(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← 指派 ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}`)
           }
           if (result.bugs.length === 0) lines.push('  （没有匹配的单据）')
           lines.push('下一步：用 zentao_bug_context bugID=<id> 取该单的完整上下文（详情 + 解决表单默认值与必填项）。')
+          return { text: lines.join('\n') }
+        } catch (error) {
+          const failure = authFailure(error)
+          if (failure) return failure
+          throw error
+        }
+      },
+    }),
+
+    defineTool({
+      name: 'zentao_projects',
+      description: '列出禅道里当前账号可见的项目（id + 名称，来自 /index.php?m=project&f=index）。配合 zentao_my_bugs 的 scope=project + projectID 按项目看 Bug。',
+      parameters: {},
+      output: {
+        schema: { type: 'object', additionalProperties: true, properties: { text: { type: 'string' } } },
+        render: (_args, value) => text(String((value as { text?: string }).text ?? '')),
+      },
+      async execute(): Promise<{ text: string }> {
+        try {
+          const result = await workbench.projects()
+          const lines = [`项目（${result.projects.length} 个，经「${result.via}」）`]
+          for (const project of result.projects) lines.push(`  ${project.id}  ${project.name}`)
+          if (result.projects.length === 0) lines.push('  （没有可见项目）')
           return { text: lines.join('\n') }
         } catch (error) {
           const failure = authFailure(error)

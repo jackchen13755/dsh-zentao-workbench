@@ -83,12 +83,14 @@
           : { ok: true, value: { server: 'https://zentao.example.com', serverSource: 'config', authenticated: true, strategy: 'bridge', probes: [{ id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（以实测为准）' }], config: { server: 'https://zentao.example.com', authenticated: true, probes: [] } } }
       case 'listBugs':
         return { ok: true, value: { bugs: BUGS, total: BUGS.length, truncated: false, via: 'bridge', url: 'https://zentao.example.com/index.php?m=my&f=bug', fetchedAt: new Date().toISOString(), cached: false } }
+      case 'listProjects':
+        return { ok: true, value: { projects: [{ id: '187', name: 'Upsell STUAT' }, { id: '213', name: 'SPMS UAT' }], via: 'bridge', url: '', fetchedAt: new Date().toISOString() } }
       case 'listTasks':
         return { ok: true, value: { tasks: [], total: 0, empty: true, via: 'bridge', url: '', fetchedAt: new Date().toISOString(),
           note: '该项目（或本实例）没有任务数据；实测本实例 8 个项目全部为空 —— 这里是如实反映，不是解析失败' } }
       case 'bugContext':
         return { ok: true, value: {
-          bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', status: '激活', assignedTo: 'Dev One', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
+          bug: { id: '55036', title: '查询条件location浮层问题', product: 'Service360', productLabel: 'Service360', status: '激活', assignedTo: 'Dev One', severity: '主要', severityLevel: 3, story: '#3982 GReAT优化', storyID: '3982', url: 'https://zentao.example.com/index.php?m=bug&f=view&bugID=55036' },
           resolve: {
             uid: 'kuid-harness',
             fields: [

@@ -107,8 +107,14 @@ export function createZentaoRpcHandler(deps: RpcDeps) {
             only: (body.only === 'open' || body.only === 'resolved' ? body.only : 'all') as 'all' | 'open' | 'resolved',
             refresh: body.refresh === true,
             ...(orderBy === undefined ? {} : { orderBy }),
+            ...(body.scope === 'project' ? { scope: 'project' as const } : {}),
+            ...(typeof body.projectID === 'string' ? { projectID: body.projectID } : {}),
           })
           return { ok: true, value: result }
+        }
+
+        case 'listProjects': {
+          return { ok: true, value: await workbench.projects() }
         }
 
         case 'listTasks': {

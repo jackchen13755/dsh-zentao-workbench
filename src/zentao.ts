@@ -13,7 +13,7 @@
  */
 
 import { FIELD_LABELS, RESOLVE_FIELD_RULES } from './fields.js'
-import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseListTotal, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type SelectOption, type TaskRow } from './parse.js'
+import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseListTotal, parseProjectList, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type ProjectRow, type SelectOption, type TaskRow } from './parse.js'
 import { planResolve, submitResolve, type ResolveArgs, type ResolvePlan, type SubmitOutcome } from './resolve.js'
 import type { StrategyId, ZenTaoSession } from './session.js'
 
@@ -47,10 +47,23 @@ export function normalizeOrderBy(value: string | undefined): BugOrderBy | '' {
   return `${field}_${match![2] as 'asc' | 'desc'}`
 }
 
+export interface ProjectsResult {
+  projects: ProjectRow[]
+  via: StrategyId
+  url: string
+  fetchedAt: string
+}
+
 export interface MyBugsResult {
   bugs: BugRow[]
   /** The order actually requested (`id_desc` by default), echoed for the caller. */
   orderBy: BugOrderBy | ''
+  /** Which scope this page came from: the caller's own queue, or one project. */
+  scope: 'mine' | 'project'
+  /** Present when `scope === 'project'`. */
+  projectID?: string
+  /** Project name read off the page title, e.g. 【Upsell STUAT】. */
+  projectName?: string
   /** The pager's own count when the page exposes it, else the rows on this page. */
   total: number
   /** True when this page holds fewer rows than `total` (caller should not read it as "everything"). */
@@ -108,7 +121,7 @@ export class ZentaoWorkbench {
   private readonly listTtlMs: number
   /** The full dropdown lives here, never in a returned context. */
   private readonly bugs = new Map<string, { at: number, value: BugContext, buildOptions: SelectOption[] }>()
-  private list: { at: number, orderBy: BugOrderBy | '', value: MyBugsResult } | null = null
+  private list: { at: number, orderBy: BugOrderBy | '', scope: 'mine' | 'project', projectID: string, value: MyBugsResult } | null = null
 
   constructor(readonly session: ZenTaoSession, options: WorkbenchOptions = {}) {
     this.bugTtlMs = options.bugTtlMs ?? 10 * 60_000
@@ -140,12 +153,16 @@ export class ZentaoWorkbench {
     this.list = null
   }
 
-  async myBugs(options: { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string } = {}): Promise<MyBugsResult> {
+  async myBugs(options: { limit?: number, only?: 'all' | 'open' | 'resolved', refresh?: boolean, orderBy?: string, scope?: 'mine' | 'project', projectID?: string } = {}): Promise<MyBugsResult> {
     const limit = Math.min(Math.max(options.limit ?? 30, 1), 200)
     const wanted = normalizeOrderBy(options.orderBy)
-    // The cache is keyed by the requested order too: returning an id_desc page
-    // for a severity_asc request would be a silent lie.
-    const cached = this.list !== null && !options.refresh && this.list.orderBy === wanted && Date.now() - this.list.at < this.listTtlMs
+    const scope: 'mine' | 'project' = options.scope === 'project' && (options.projectID ?? '') !== '' ? 'project' : 'mine'
+    const projectID = scope === 'project' ? String(options.projectID) : ''
+    // The cache is keyed by scope and order too: answering an id_desc "my bugs"
+    // request with a project page (or vice versa) would be a silent lie.
+    const cached = this.list !== null && !options.refresh
+      && this.list.orderBy === wanted && this.list.scope === scope && this.list.projectID === projectID
+      && Date.now() - this.list.at < this.listTtlMs
     if (!cached) {
       const orderBy = wanted
       // Parameter order matters on this instance: `type=assignedTo` must come
@@ -155,17 +172,30 @@ export class ZentaoWorkbench {
       //   m=my&f=bug&orderBy=id_desc                  → 0 rows
       //   m=my&f=bug&type=assignedTo&orderBy=id_desc  → 29 rows
       // This mirrors the URL the page's own pager generates.
-      const page = await this.session.get(`/index.php?m=my&f=bug&type=assignedTo${orderBy === '' ? '' : `&orderBy=${orderBy}`}`)
+      // Same rule for the project scope: `projectID` must precede `orderBy`
+      // (measured: reversing them returns 0 rows on both list kinds).
+      const base = scope === 'project'
+        ? `/index.php?m=project&f=bug&projectID=${encodeURIComponent(projectID)}`
+        : '/index.php?m=my&f=bug&type=assignedTo'
+      const page = await this.session.get(`${base}${orderBy === '' ? '' : `&orderBy=${orderBy}`}`)
+      const projectName = scope === 'project'
+        ? (/<title>\s*(?:【([^】]{1,40})】|[^<]{0,60}?)::/.exec(page.body)?.[1] ?? '').trim()
+        : ''
       const bugs = parseBugList(page.body)
       const pagerTotal = parseListTotal(page.body)
       this.list = {
         at: Date.now(),
         orderBy,
+        scope,
+        projectID,
         value: {
           bugs,
           total: pagerTotal ?? bugs.length,
           truncated: pagerTotal !== null && pagerTotal > bugs.length,
           orderBy,
+          scope,
+          ...(projectID === '' ? {} : { projectID }),
+          ...(projectName === '' ? {} : { projectName }),
           via: page.strategy,
           url: page.url,
           fetchedAt: new Date().toISOString(),
@@ -180,6 +210,17 @@ export class ZentaoWorkbench {
       ? source.bugs
       : source.bugs.filter((bug) => (only === 'open' ? bug.resolution === '' && bug.resolvedBy === '' : bug.resolution !== '' || bug.resolvedBy !== ''))
     return { ...source, bugs: filtered.slice(0, limit), cached }
+  }
+
+  /** Projects visible to this account (id + name). */
+  async projects(): Promise<ProjectsResult> {
+    const page = await this.session.get('/index.php?m=project&f=index')
+    return {
+      projects: parseProjectList(page.body),
+      via: page.strategy,
+      url: page.url,
+      fetchedAt: new Date().toISOString(),
+    }
   }
 
   /**

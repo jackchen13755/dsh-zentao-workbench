@@ -18,6 +18,7 @@ describe('tool surface', () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       'zentao_session_status',
       'zentao_my_bugs',
+      'zentao_projects',
       'zentao_tasks',
       'zentao_bug_context',
       'zentao_resolve_bug',

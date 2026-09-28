@@ -21,7 +21,7 @@
  */
 
 import { FIELD_LABELS, RESOLVE_FIELD_RULES } from './fields.js'
-import { matchBuildOptions, type SelectOption } from './parse.js'
+import { matchBuildOptions, type SelectOption, decodeEntities} from './parse.js'
 import type { PageResult, ZenTaoSession } from './session.js'
 import type { BugContext } from './zentao.js'
 
@@ -84,6 +84,28 @@ export function charLength(value: string): number {
  * Shorten to `max` code points at a sentence boundary when possible.
  * Returns the input untouched when it already fits.
  */
+/**
+ * Turn an HTML default into plain text.
+ *
+ * ZenTao pads these templates with empty paragraphs and `<br />` runs to reserve
+ * writing space; both the tags and the padding are meaningless once stored as the
+ * ticket's reason. Block tags become line breaks, filler collapses, entities
+ * decode — so the ticket reads like a sentence instead of like markup.
+ */
+export function htmlToText(html: string): string {
+  if (!/<\s*[a-z][\s\S]*?>/i.test(html)) return html.trim()
+  return decodeEntities(html)
+    .replace(/<\s*(br|\/p|\/div|\/li|\/tr)\s*\/?>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '· ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line !== '')
+    .join('\n')
+    .trim()
+}
+
 export function compressToLimit(text: string, max: number): { text: string, from: number, to: number, compressed: boolean } {
   const from = charLength(text)
   if (from <= max) return { text, from, to: from, compressed: false }
@@ -167,7 +189,13 @@ export function planResolve(context: BugContext, args: ResolveArgs, options: { r
   const impactValue = impact !== '' ? impact : autoImpact(context)
   if (impact === '') autoFilled.changeImpact = '服务端必填但表单为空，已自动填充最小可接受内容（有具体改动范围请覆盖）'
 
-  let detailValue = args.detail ?? resolve.defaults.detail_reason ?? ''
+  // The form's `detail_reason` default is ZenTao's **HTML template**
+  // (`<p><strong>[产生原因及改进]</strong>(开发填写)</p><br />…`). Submitting it
+  // verbatim stored the tags as text: the ticket then showed raw markup inside its
+  // own textarea (user report). Templates are turned into readable plain text;
+  // text a caller passes explicitly is left alone.
+  const detailDefault = resolve.defaults.detail_reason ?? ''
+  let detailValue = args.detail ?? htmlToText(detailDefault)
   let compressed: ResolvePlan['compressed']
   if (args.detail !== undefined) {
     const limit = RESOLVE_FIELD_RULES.find((rule) => rule.name === 'detail_reason')?.max ?? 512

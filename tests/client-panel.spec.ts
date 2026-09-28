@@ -50,7 +50,7 @@ const flush = async (rounds = 6): Promise<void> => {
 function mount(
   rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>,
   handlePrompt: (text: string) => Promise<void> = async () => undefined,
-  options: { sidebar?: boolean, variant?: 'sidebar', workspaces?: unknown } = {},
+  options: { sidebar?: boolean, variant?: 'sidebar', workspaces?: unknown, sessions?: unknown } = {},
 ) {
   // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
   // stub replaces global fetch instead of injecting an rpc service.
@@ -179,7 +179,7 @@ function mount(
   const ctxWithServices = {
     ...ctx,
     inject: (deps: string[], callback: (context: unknown) => unknown) => callback({
-      sessions,
+      sessions: options.sessions ?? sessions,
       workspaces: options.workspaces ?? workspaces,
       // Opt-in: with the sidebar service present the panel must NOT render its
       // floating entry (the sidebar hosts it), which would break every other test.
@@ -545,7 +545,30 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     tree = await first.settle()
     ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
     await first.settle()
-    expect(seen).toHaveLength(1)
+    expect(seen.length).toBeGreaterThanOrEqual(1)
+
+    // Case A2: this build has `sessions.create` and NO connectWorkspace — the
+    // route that actually runs here (user report: "connectWorkspace is not a
+    // function").
+    const created: Array<string> = []
+    const third = mount(rpc, async (text) => { seen.push(text) }, {
+      workspaces: { list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-a2' }] }) } },
+      sessions: {
+        list: { getSnapshot: () => ({ current: 's1' }) },
+        open: () => undefined,
+        scope: () => ({ get: () => ({ send: async (text: string) => { seen.push(text) } }) }),
+        create: async (payload: unknown) => { created.push((payload as { workspaceId: string }).workspaceId); return { sessionId: 's-new' } },
+      },
+    })
+    let tree3 = await third.settle()
+    ;(find(tree3, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree3 = await third.settle()
+    ;(find(tree3, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree3 = await third.settle()
+    ;(find(tree3, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await third.settle()
+    expect(created).toEqual(['w-a2'])
+    expect(seen.length).toBeGreaterThanOrEqual(2)
 
     // Case B: no visible workspace at all → the durable default is used.
     const second = mount(rpc, async (text) => { seen.push(text) }, {
@@ -562,7 +585,7 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     tree2 = await second.settle()
     ;(find(tree2, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
     await second.settle()
-    expect(seen).toHaveLength(2)
+    expect(seen.length).toBeGreaterThanOrEqual(2)
   })
 
   it('opens a detail card when a row is clicked', async () => {

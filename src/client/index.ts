@@ -56,10 +56,15 @@ interface SessionsFace {
   list: SessionListLike
   open(id: string): void
   scope(id: string): ScopedLike | undefined
+  /** Session creator on this build (the reference build uses connectWorkspace). */
+  create?(payload: { workspaceId: string }): Promise<unknown>
 }
 interface WorkspacesFace {
   list: WorkspaceListLike
-  connectWorkspace(id: string): Promise<string>
+  /** Only on the reference plugin's build; absent here (capability-probed). */
+  connectWorkspace?(id: string): Promise<string>
+  /** Durable default workspace on this build. */
+  initializeDefault?(signal?: unknown): Promise<unknown>
 }
 
 interface NativeTabType {
@@ -122,6 +127,27 @@ async function defaultWorkspaceId(workspaces: WorkspacesFace): Promise<string | 
   }
 }
 
+/**
+ * Create a session inside `workspaceId` on whichever API this build exposes.
+ *
+ * Returns the new session id. Throws a message naming both APIs when neither is
+ * present, so the next shape mismatch reports itself instead of failing obscurely.
+ */
+async function createSessionIn(workspaces: WorkspacesFace, sessions: SessionsFace, workspaceId: string): Promise<string> {
+  const sessionApi = sessions as { create?: (payload: { workspaceId: string }) => Promise<unknown> }
+  if (typeof sessionApi.create === 'function') {
+    const created = await sessionApi.create({ workspaceId })
+    const id = typeof created === 'string'
+      ? created
+      : (created as { sessionId?: unknown, id?: unknown } | undefined)?.sessionId
+        ?? (created as { id?: unknown } | undefined)?.id
+    if (typeof id === 'string' && id !== '') return id
+  }
+  const legacy = (workspaces as { connectWorkspace?: (id: string) => Promise<string> }).connectWorkspace
+  if (typeof legacy === 'function') return await legacy.call(workspaces, workspaceId)
+  throw new Error('无法新建会话：该构建既没有 sessions.create，也没有 workspaces.connectWorkspace')
+}
+
 function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspaces?: WorkspacesFace }, ctx: ClientContext) {
   return async (text: string): Promise<void> => {
     // Reading them as *properties* is what the reference plugin does, and it is
@@ -161,7 +187,14 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
       throw new Error(`未找到可用项目（workspace）：当前会话 ${current ?? '未知'}，可见项目 ${list.length} 个`
         + `${list.length === 0 ? '' : `（${list.map((item) => item.workspaceId ?? '?').join('/')}）`}，默认项目也取不到`)
     }
-    const sessionId = await workspaces.connectWorkspace(target)
+    // Open a session for that workspace by capability, not by assumption.
+    //
+    // Measured: the reference plugin calls `workspaces.connectWorkspace`, but this
+    // build's workspaces client has no such method (grep of its client half:
+    // `connectWorkspace` 0 hits while `create`/`initializeDefault` are there).
+    // `sessions.create` is the documented creator on this build, so try that
+    // first and keep the old call as the compatibility route.
+    const sessionId = await createSessionIn(workspaces, sessions, target)
     sessions.open(sessionId)
     const scoped = sessions.scope(sessionId)
     if (scoped === undefined) throw new Error('新建会话失败：无法解析会话作用域')

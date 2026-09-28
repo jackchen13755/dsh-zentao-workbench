@@ -27,7 +27,7 @@ export function sessionExpired(html: string): boolean {
   return isLoginRedirect(html) || !isLoggedIn(html)
 }
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   return text
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')

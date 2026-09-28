@@ -47,6 +47,22 @@
 | `zentao_bug_context` | 一次读全一条单的解决上下文 |
 | `zentao_resolve_bug` | 解决：计划 → 本地校验 → 提交 → 回读验证（建议先 `dryRun`） |
 
+CLI（`bin/zentao.mjs`，与工具共用同一套解析）：
+
+```
+zentao status                     # 四条登录路径各探测到什么
+zentao bugs [--only open]         # 我的 Bug
+zentao context <bugID> [--json]   # 一次读全
+zentao resolve <bugID> [--dry-run]
+zentao login --account A          # 口令读 ZENTAO_PASSWORD 或 --password-stdin
+```
+
+浏览器半边（`lib/client.js`）：可拖动悬浮入口 + 我的 Bug 列表 + 点击开详情卡 +
+拖拽/复制 Markdown 引用 + 「预览解决计划」+ 按角色「处理」起会话。
+**工具栏「刷新」一次刷新「会话状态 + 列表 + 打开的详情 + 已生成的计划」**，页脚显示
+最近更新时间，并可选 1/5/15/30 分钟自动刷新。未登录时面板主体就是四策略探测报告
+（每条带下一步动作）+ 账密登录表单。面板默认只读：提交需二次确认。
+
 ## 安装
 
 ```sh
@@ -77,8 +93,13 @@ DSH 自带的 node（`~/.dsh/dsh-runtimes/*/dependencies/node`）带签名且开
 
 ## 状态
 
-M1（会话链 + 解析器 + 三个读工具 + 压 retry 的 resolve 规划）已完成，27 个单测通过，
-并在真实实例上核对：列表、上下文、真实单据 dryRun（`blocked=false`）。
-M2：resolve 收口与 CLI；M3：悬浮面板；M4：表单账密登录。见 [DESIGN.md](DESIGN.md)。
+四个里程碑都已落地：M1 会话链/解析器/读工具 + 一次成解决规划；M2 CLI；M3 面板
+（宿主 RPC + 浏览器半边，含一键刷新）；M4 表单账密登录。**64 个单测通过**，
+host+client typecheck clean，并在真实实例上核对：我的 Bug 列表（经桥）、单条上下文
+（1792 字节 vs 原始表单 255592 字节）、真实单据 dryRun（`blocked=false`）、
+登录链路（错误凭据得到服务端原文判词）。
+
+尚未验证：面板在浏览器里的实机渲染（需重启 DSH）、以及一次**真实提交**
+（需指定一个可解决的 bug）。任务列表因该账号无任务数据而未实现。见 [DESIGN.md](DESIGN.md)。
 
 MIT。

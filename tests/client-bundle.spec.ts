@@ -96,6 +96,18 @@ describe('browser bundle', () => {
     expect(registered[0]!.options).toMatchObject({ name: 'shell.overlay', id: 'zentao-workbench' })
   })
 
+  it('carries no placeholder host or unfinished marker into the shipped bundle', () => {
+    // Regression: the drag reference was once built as
+    // `https://example.invalid${href}`, so a quoted bug carried a dead link.
+    // Instances differ, so the origin must come from the RPC config at runtime.
+    const source = readFileSync('lib/client.js', 'utf8')
+    for (const marker of ['example.invalid', 'example.com', 'TODO', 'FIXME', 'XXX']) {
+      expect(source.includes(marker), `bundle must not contain ${marker}`).toBe(false)
+    }
+    // …and the origin-joining helper must actually be there.
+    expect(source).toContain("startsWith('/')")
+  })
+
   it('renders its first frame without a session (the panel body is the status report)', () => {
     const { module, react } = loadBundle()
     let component: ((props: unknown) => unknown) | undefined

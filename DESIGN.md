@@ -250,11 +250,20 @@
 
 ## 10. 分阶段
 
-| 里程碑 | 内容 | 可验证结果 |
+| 里程碑 | 内容 | 状态 |
 |---|---|---|
-| **M1** | SessionProvider（①②，③④ 留桩）+ 解析器 + `zentao_session_status` / `zentao_my_bugs` / `zentao_bug_context` + 缓存 | 真实实例上：列出我的 Bug；单次 `bug_context` 体积 ≤ 现状 1/10；未登录提示可操作 |
-| **M2** | `zentao_resolve_bug` 收口（dryRun 默认）+ CLI `--context` | 真单 dryRun 全字段核对通过 |
-| **M3** | 面板（悬浮入口 + 列表 + 点击详情 + 拖拽 + 处理按钮 + 未登录态） | 浏览器实机验证 |
-| **M4** | 表单账密登录（③）+ 手工注入（④）+ 回归测试补齐 | 四策略全部有实测证据 |
+| **M1** | SessionProvider + 解析器 + 三个读工具 + 一次成解决规划 | ✅ 实机：列 Bug、上下文 1792B vs 表单 255592B、真单 dryRun `blocked=false` |
+| **M2** | CLI（与工具同一套解析）+ 修两个实机暴露的 bug | ✅ 实机四子命令；env 与失效判定两个 bug 已修并补测 |
+| **M3** | 面板：宿主 RPC（只读默认 + confirm 门禁）+ 浏览器半边（含一键刷新） | ✅ 代码与 loader 契约测试通过；**浏览器实机待重启后确认** |
+| **M4** | 表单账密登录 + 手工注入 | ✅ 登录链路实机验证（错误凭据→服务端判词）；手工注入走 `ZENTAO_COOKIE` |
+
+### 实测补充（实现期新增的证据）
+
+- 登录契约：`POST /index.php?m=user&f=login`（`account`/`password`/`keepLogin[]`/`referer`/`verifyRand`）。
+  页面里的 `md5(md5(password)+rand)` 挂在并不存在的 `#verifyPassword` 上 → 表单发明文；
+  **失败时也会下发 `zentaosid`**，所以必须回读真实页面判成功；服务端点名凭据错误时**不再试**第二种编码。
+- 面板刷新：一次刷新「状态 + 列表 + 打开的详情 + 已生成的计划」，因为只刷列表会让卡片继续显示过期字段。
+- 任务列表：`m=my&f=task`、`m=my&f=task&type=assignedTo`（13KB 空页）、
+  `m=task&f=browse&type=assignedTo`（153B 跳转）**三条路由均无数据** → 解析器无法用真实数据验证，暂不实现。
 
 命名：暂定 `dsh-zentao-workbench`（可改）。位置：`~/Desktop/dsh/github/dsh-zentao-workbench`。

@@ -82,6 +82,17 @@ const box: Record<string, unknown> = {
   fontSize: 13,
 }
 
+/**
+ * The instance origin is needed to turn the list page's relative `href` into a
+ * link a reader (or the model) can actually open. It comes from the RPC config —
+ * never hardcoded, because the same plugin is used against different instances.
+ */
+function absoluteUrl(server: string, hrefOrUrl: string): string {
+  if (hrefOrUrl === '') return ''
+  if (/^https?:\/\//i.test(hrefOrUrl)) return hrefOrUrl
+  return `${server.replace(/\/+$/, '')}${hrefOrUrl.startsWith('/') ? '' : '/'}${hrefOrUrl}`
+}
+
 function referenceOf(bug: { id: string, title: string, status?: string, pri?: string, assignedTo?: string, url?: string }, extra?: { severity?: string }): string {
   return [
     `【禅道 Bug #${bug.id}】${bug.title}`,
@@ -106,7 +117,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
-  const drag = useRef<{ active: boolean, dx: number, dy: number }>({ active: false, dx: 0, dy: 0 })
+  const drag = useRef<{ active: boolean, dx: number, dy: number, moved: boolean }>({ active: false, dx: 0, dy: 0, moved: false })
 
   const call = useCallback(async (endpoint: string, payload?: unknown): Promise<unknown> => {
     const result = await deps.rpc.call('/zentao', endpoint, payload)
@@ -189,12 +200,15 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   }, [flash])
 
   const onPointerDown = useCallback((event: { clientX: number, clientY: number }) => {
-    drag.current = { active: true, dx: event.clientX - pos.x, dy: event.clientY - pos.y }
+    drag.current = { active: true, dx: event.clientX - pos.x, dy: event.clientY - pos.y, moved: false }
   }, [pos.x, pos.y])
 
   useEffect(() => {
     const move = (event: PointerEvent): void => {
       if (!drag.current.active) return
+      // A few pixels of slop: a click that jitters must not count as a drag,
+      // and a drag must not toggle the panel on release.
+      if (Math.abs(event.clientX - (pos.x + drag.current.dx)) > 3 || Math.abs(event.clientY - (pos.y + drag.current.dy)) > 3) drag.current.moved = true
       setPos({ x: Math.max(8, Math.min(window.innerWidth - 48, event.clientX - drag.current.dx)), y: Math.max(8, Math.min(window.innerHeight - 48, event.clientY - drag.current.dy)) })
     }
     const up = (): void => { drag.current.active = false }
@@ -245,7 +259,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     type: 'button',
     title: '禅道工作台（可拖动）',
     onPointerDown,
-    onClick: () => setOpen((value) => !value),
+    onClick: () => {
+      if (drag.current.moved) { drag.current.moved = false; return }
+      setOpen((value) => !value)
+    },
     style: {
       ...box,
       position: 'fixed',
@@ -358,7 +375,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         key: bug.id,
         draggable: true,
         onDragStart: (event: { dataTransfer?: { setData(type: string, value: string): void } }) => {
-          event.dataTransfer?.setData('text/plain', referenceOf({ ...bug, status: bug.resolution === '' ? '未解决' : '已解决', url: `https://example.invalid${bug.href}` }))
+          event.dataTransfer?.setData('text/plain', referenceOf({
+            ...bug,
+            status: bug.resolution === '' ? '未解决' : '已解决',
+            url: absoluteUrl(config?.server ?? '', bug.href),
+          }))
         },
         onClick: () => void openDetail(bug.id),
         style: { padding: '7px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' },
@@ -418,7 +439,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 try {
                   const value = await call('resolveSubmit', { bugID: selected.bug.id, confirm: true }) as { outcome: { ok: boolean, status: string, serverError?: string } }
                   setFlash(value.outcome.ok ? `已解决并回读确认（${value.outcome.status}）` : `未接受：${value.outcome.serverError ?? value.outcome.status}`)
-                  await refreshBugs(true)
+                  if (value.outcome.ok) setPlan(null)
+                  // Re-read everything visible: the list entry and the detail card
+                  // both describe a bug that just changed state.
+                  await refreshAll(true)
                 } catch (problem) {
                   setError((problem as Error).message)
                 } finally {

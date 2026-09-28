@@ -409,7 +409,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           '想让它每次启动都生效：在 profile 的 cordis.patch.yml 里给 zentao-workbench 那行加 config: { server: … }，或设环境变量 ZENTAO_BASE；本机若已导出过 cookie jar，也会自动从 jar 里认出实例。')))
     }
 
-    body.push(createElement('div', { key: 'probes', style: { padding: '10px 12px' } },
+    body.push(createElement('div', { key: 'probes', 'data-zentao-probes': '1', style: { padding: '10px 12px', flex: 1, minHeight: 0, overflowY: 'auto' } },
       createElement('div', { style: { color: TOKEN.dim, marginBottom: 6 } }, '未登录 —— 每条登录路径的探测结果与下一步：'),
       ...(config?.probes ?? []).map((probe) => createElement('div', { key: probe.id, style: { padding: '6px 0', borderTop: `1px solid ${TOKEN.line}` } },
         createElement('div', {}, `${probe.ready === false ? '✘' : '·'} ${probe.label}：${probe.detail}`),
@@ -486,7 +486,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       }, value === 'bugs' ? '我的 Bug' : '任务'))))
 
     if (tab === 'tasks') {
-      body.push(createElement('div', { key: 'tasks', style: { padding: '10px 12px', maxHeight: 320, overflow: 'auto' } },
+      body.push(createElement('div', { key: 'tasks', 'data-zentao-tasks': '1', style: { padding: '10px 12px', flex: 1, minHeight: 0, overflowY: 'auto' } },
         ...tasks.map((task) => createElement('div', { key: task.id, style: { padding: '6px 0', borderBottom: `1px solid ${TOKEN.line}` } },
           createElement('div', null, `#${task.id} ${task.name}`),
           createElement('div', { style: { color: TOKEN.dim, fontSize: 11 } }, `${task.status || '-'} · 指派 ${task.assignedTo || '-'}`))),
@@ -533,31 +533,62 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
 
     // Only the active tab renders: the list and the detail card used to stay
     // mounted under the task tab (found in the browser harness).
-    if (tab === 'bugs') body.push(createElement('div', { key: 'list', style: { maxHeight: 260, overflow: 'auto' } },
-      ...bugs.map((bug) => createElement('div', {
-        key: bug.id,
-        'data-zentao-bug': bug.id,
-        draggable: true,
-        onDragStart: (event: { dataTransfer?: { setData(type: string, value: string): void } }) => {
-          event.dataTransfer?.setData('text/plain', referenceOf({
-            ...bug,
-            status: bug.resolution === '' ? '未解决' : '已解决',
-            url: absoluteUrl(config?.server ?? '', bug.href),
-          }))
-        },
-        onClick: () => void openDetail(bug.id),
-        style: { padding: '7px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' },
+    if (tab === 'bugs') {
+      // The list owns every remaining pixel; the detail is an overlay laid on top
+      // of it (it used to be a 260px list with the card squeezed underneath, which
+      // left most of the drawer empty).
+      // `selected` is narrowed here too: the submit handler below reads its id,
+      // and this section is only ever rendered inside the detail overlay.
+      const planSection = plan === null || selected === null ? null : createElement('div', {
+        key: 'plan',
+        style: { borderTop: `1px solid ${TOKEN.line}`, marginTop: 12, paddingTop: 10 },
       },
-      createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'baseline' } },
-        createElement('span', { style: { color: TOKEN.dim, fontSize: 11 } }, `#${bug.id}`),
-        createElement('span', { style: { flex: 1 } }, bug.title)),
-      createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
-        severityBadge(bug.severity || '', bug.severityLevel),
-        createElement('span', null, `P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`))))))
+          createElement('div', { style: { fontWeight: 600, marginBottom: 4 } }, plan.blocked ? '解决计划（被拦，不能提交）' : '解决计划（预览，未提交）'),
+          ...plan.fields.map(([name, value]) => createElement('div', { key: name, style: { fontSize: 12, display: 'flex', gap: 6 } },
+            createElement('span', { style: { color: TOKEN.dim, minWidth: 108 } }, name),
+            createElement('span', { style: { flex: 1, wordBreak: 'break-all' } }, value === '' ? '(空)' : String(value).slice(0, 160)))),
+          ...Object.entries(plan.autoFilled).map(([name, why]) => createElement('div', { key: `af-${name}`, style: { fontSize: 11, color: TOKEN.dim, marginTop: 2 } }, `↳ ${name}：${why}`)),
+          ...plan.problems.map((problem) => createElement('div', { key: problem, style: { fontSize: 12, color: TOKEN.danger, marginTop: 2 } }, `✘ ${problem}`)),
+          createElement('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
+            createElement('button', {
+              type: 'button',
+              disabled: plan.blocked,
+              style: { cursor: plan.blocked ? 'not-allowed' : 'pointer' },
+              onClick: async () => {
+                // Writing asks first: the panel is a read surface by default.
+                if (!window.confirm(`确认在禅道把 #${selected.bug.id} 标记为已解决？此操作会写入真实系统。`)) return
+                setBusy('submit')
+                try {
+                  const value = await call('resolveSubmit', { bugID: selected.bug.id, confirm: true }) as { outcome: { ok: boolean, status: string, serverError?: string } }
+                  setFlash(value.outcome.ok ? `已解决并回读确认（${value.outcome.status}）` : `未接受：${value.outcome.serverError ?? value.outcome.status}`)
+                  if (value.outcome.ok) setPlan(null)
+                  // Re-read everything visible: the list entry and the detail card
+                  // both describe a bug that just changed state.
+                  await refreshAll(true)
+                } catch (problem) {
+                  setError((problem as Error).message)
+                } finally {
+                  setBusy('')
+                }
+              },
+            }, busy === 'submit' ? '提交中…' : '② 确认并提交解决')))
 
-    if (tab === 'bugs' && selected !== null) {
-      body.push(createElement('div', { key: 'detail', style: { borderTop: `1px solid ${TOKEN.line}`, padding: '10px 12px', maxHeight: 300, overflow: 'auto' } },
-        createElement('div', { style: { fontWeight: 600 } }, `${selected.bug.id}｜${selected.bug.title}`),
+      const detailOverlay = selected === null ? null : createElement('div', {
+        key: 'detail',
+        'data-zentao-detail': '1',
+        style: { position: 'absolute', inset: 0, zIndex: 2, background: TOKEN.bg, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
+      },
+      createElement('div', {
+        style: { position: 'sticky', top: 0, zIndex: 1, display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', background: TOKEN.bg, borderBottom: `1px solid ${TOKEN.line}` },
+      },
+      createElement('button', {
+        type: 'button',
+        'data-zentao-action': 'close-detail',
+        onClick: () => { setSelected(null); setPlan(null) },
+        style: { cursor: 'pointer' },
+      }, '← 返回列表'),
+      createElement('span', { style: { flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, `#${selected.bug.id} ${selected.bug.title}`)),
+      createElement('div', { style: { padding: '10px 12px' } },
         createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
           severityBadge(selected.bug.severity || '', selected.bug.severityLevel),
           createElement('span', null, `产品 ${selected.bug.product || '-'}｜状态 ${selected.bug.status || '-'}｜指派 ${selected.bug.assignedTo || '-'}`)),
@@ -592,40 +623,36 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 setError((problem as Error).message)
               }
             },
-          }, `处理·${role.label}`)))))
+          }, `处理·${role.label}`))),
+      planSection))
 
-      if (plan !== null) {
-        body.push(createElement('div', { key: 'plan', style: { borderTop: `1px solid ${TOKEN.line}`, padding: '10px 12px', maxHeight: 260, overflow: 'auto' } },
-          createElement('div', { style: { fontWeight: 600, marginBottom: 4 } }, plan.blocked ? '解决计划（被拦，不能提交）' : '解决计划（预览，未提交）'),
-          ...plan.fields.map(([name, value]) => createElement('div', { key: name, style: { fontSize: 12, display: 'flex', gap: 6 } },
-            createElement('span', { style: { color: TOKEN.dim, minWidth: 108 } }, name),
-            createElement('span', { style: { flex: 1, wordBreak: 'break-all' } }, value === '' ? '(空)' : String(value).slice(0, 160)))),
-          ...Object.entries(plan.autoFilled).map(([name, why]) => createElement('div', { key: `af-${name}`, style: { fontSize: 11, color: TOKEN.dim, marginTop: 2 } }, `↳ ${name}：${why}`)),
-          ...plan.problems.map((problem) => createElement('div', { key: problem, style: { fontSize: 12, color: TOKEN.danger, marginTop: 2 } }, `✘ ${problem}`)),
-          createElement('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
-            createElement('button', {
-              type: 'button',
-              disabled: plan.blocked,
-              style: { cursor: plan.blocked ? 'not-allowed' : 'pointer' },
-              onClick: async () => {
-                // Writing asks first: the panel is a read surface by default.
-                if (!window.confirm(`确认在禅道把 #${selected.bug.id} 标记为已解决？此操作会写入真实系统。`)) return
-                setBusy('submit')
-                try {
-                  const value = await call('resolveSubmit', { bugID: selected.bug.id, confirm: true }) as { outcome: { ok: boolean, status: string, serverError?: string } }
-                  setFlash(value.outcome.ok ? `已解决并回读确认（${value.outcome.status}）` : `未接受：${value.outcome.serverError ?? value.outcome.status}`)
-                  if (value.outcome.ok) setPlan(null)
-                  // Re-read everything visible: the list entry and the detail card
-                  // both describe a bug that just changed state.
-                  await refreshAll(true)
-                } catch (problem) {
-                  setError((problem as Error).message)
-                } finally {
-                  setBusy('')
-                }
-              },
-            }, busy === 'submit' ? '提交中…' : '② 确认并提交解决'))))
-      }
+      body.push(createElement('div', { key: 'content', style: { position: 'relative', flex: 1, minHeight: 0 } },
+        createElement('div', {
+          key: 'list',
+          'data-zentao-list': '1',
+          style: { position: 'absolute', inset: 0, overflowY: 'auto' },
+        },
+      ...bugs.map((bug) => createElement('div', {
+        key: bug.id,
+        'data-zentao-bug': bug.id,
+        draggable: true,
+        onDragStart: (event: { dataTransfer?: { setData(type: string, value: string): void } }) => {
+          event.dataTransfer?.setData('text/plain', referenceOf({
+            ...bug,
+            status: bug.resolution === '' ? '未解决' : '已解决',
+            url: absoluteUrl(config?.server ?? '', bug.href),
+          }))
+        },
+        onClick: () => void openDetail(bug.id),
+        style: { padding: '7px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' },
+      },
+      createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'baseline' } },
+        createElement('span', { style: { color: TOKEN.dim, fontSize: 11 } }, `#${bug.id}`),
+        createElement('span', { style: { flex: 1 } }, bug.title)),
+      createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
+        severityBadge(bug.severity || '', bug.severityLevel),
+        createElement('span', null, `P${bug.pri || '-'} · ${bug.type || ''} · 指派 ${bug.assignedTo || '-'}`))))),
+        detailOverlay))
     }
   }
 
@@ -664,7 +691,12 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       fontFamily: 'system-ui,-apple-system,"PingFang SC",sans-serif',
       fontSize: 13,
     },
-  }, header, createElement('div', { style: { overflow: 'auto', flex: 1 } }, ...body), footer)
+  }, header, createElement('div', {
+    // A flex column rather than one big scroll area: the list has to own the
+    // remaining height (`minHeight: 0` is what lets a flex child shrink enough
+    // to scroll), while the unauthenticated view scrolls on its own.
+    style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 },
+  }, ...body), footer)
 
   // The drawer covers the right edge, so the tab is not rendered while it is
   // open (the reference plugin leaves its fab underneath and relies on the ✕;

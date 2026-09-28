@@ -1204,19 +1204,29 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
         // Wrapped in a padded hit area: users reported the bare checkbox was hard
         // to hit and clicks landed on the row (opening the detail) instead.
+        // A 32×32 hit area that swallows every pointer event the row might act on:
+        // the bare 13px checkbox was easy to miss, and a near-miss opened the
+        // detail instead of ticking (user report, twice). `onMouseDown` is
+        // stopped too — some shells act on press, not click.
         createElement('span', {
           'data-zentao-checkbox-hit': bug.id,
-          title: '勾选以批量处理',
+          title: '勾选以批量处理（点这里不会打开详情）',
           onClick: (event: { stopPropagation?: () => void }) => { event.stopPropagation?.(); toggleChecked(bug.id) },
-          style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, marginLeft: -5, borderRadius: 6, cursor: 'pointer', flex: '0 0 auto' },
+          onMouseDown: (event: { stopPropagation?: () => void }) => event.stopPropagation?.(),
+          onDoubleClick: (event: { stopPropagation?: () => void }) => event.stopPropagation?.(),
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 32, margin: '-6px 0 -6px -8px',
+            borderRadius: 8, cursor: 'pointer', flex: '0 0 auto',
+          },
         },
           createElement('input', {
             type: 'checkbox',
             'data-zentao-check': bug.id,
             checked: checked.includes(bug.id),
-            // The wrapper handles the click; this keeps keyboard/space working.
+            // The wrapper handles the pointer; the input keeps keyboard/space.
             onChange: () => toggleChecked(bug.id),
-            style: { cursor: 'pointer', margin: 0, width: 15, height: 15, pointerEvents: 'none' },
+            style: { cursor: 'pointer', margin: 0, width: 16, height: 16, pointerEvents: 'none' },
           })),
         createElement('span', {
           className: bug.resolution === '' ? 'zt-dot zt-dot-open' : 'zt-dot zt-dot-done',

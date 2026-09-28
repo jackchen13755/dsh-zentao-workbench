@@ -126,6 +126,9 @@ bash tests/browser-harness/prepare.sh          # 取 React/ReactDOM UMD + 拷入
 # 然后用任意静态服务器打开 tests/browser-harness/index.html
 ```
 
+面板实际长这样（harness 截图，假数据）：登录态见 `docs/panel-logged-in.png`，
+未登录态（四策略报告 + 账密登录）见 `docs/panel-not-logged-in.png`。
+
 用它实测到并修掉了三个真缺陷：入口被展开的面板压住（点不动）、切到任务页签时
 Bug 列表与详情卡仍在渲染、以及缺少 `#root` 容器（这条是 harness 自身的问题，
 但说明真 React 能抓到桩渲染器抓不到的错误）。

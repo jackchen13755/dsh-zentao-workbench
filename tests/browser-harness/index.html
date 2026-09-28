@@ -39,9 +39,27 @@
     { id: '55004', title: '使用profile字段搜索时未清空右侧location信息', severity: '次要', pri: '2', type: '代码错误', assignedTo: 'dev.one', resolution: 'fixed', href: '/index.php?m=bug&f=view&bugID=55004' },
   ]
 
+  // `?state=unauth` renders the not-logged-in panel (the four-strategy report),
+  // which is the state the user asked to be shown plainly rather than as "未登录".
+  const UNAUTH = new URLSearchParams(location.search).get('state') === 'unauth'
+  const UNAUTH_PROBES = [
+    { id: 'bridge', label: '浏览器插件桥', ready: true, detail: '守护进程在运行；扩展轮询标志为 false（该标志不可靠，以实测为准）', hint: '守护进程在，但扩展没有在轮询：打开 Chrome 确认 dsh-fetch-page 扩展已启用，然后重试' },
+    { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: 'jar 可用（10 个 cookie，3 个会话级），导出时间 2026/9/28 16:37:16', hint: '含会话级 cookie：浏览器一关就失效，需要时重新导出' },
+    { id: 'form-login', label: '表单账密登录', ready: false, detail: '没有可用的账密凭据', hint: '面板里点「账密登录」，或设环境变量 ZENTAO_ACCOUNT / ZENTAO_PASSWORD（不要写进插件配置）' },
+    { id: 'manual', label: '手工注入', ready: false, detail: '未提供 ZENTAO_COOKIE', hint: '把 Cookie 串放进环境变量 ZENTAO_COOKIE（不要写进插件配置）' },
+    { id: 'cookie-jar', label: 'Chrome cookie 导出', ready: true, detail: '会话已失效（页面被弹回登录页）', hint: '可在终端跑 ~/.local/bin/zentao-export-cookies 重新导出（会读 Keychain），或改用浏览器桥' },
+  ]
+
   const rpc = {
     call: async (_channel, endpoint, payload) => {
       window.__CALLS__.push({ endpoint, payload: payload ?? null })
+      if (UNAUTH && (endpoint === 'getConfig' || endpoint === 'sessionStatus')) {
+        return { ok: true, value: {
+          server: 'https://zentao.example.com', authenticated: false,
+          probes: UNAUTH_PROBES,
+          config: { server: 'https://zentao.example.com', authenticated: false, probes: UNAUTH_PROBES, hasEnvCookie: false, jarPaths: ['/Users/example/.config/zentao/cookies.txt'] },
+        } }
+      }
       switch (endpoint) {
         case 'getConfig':
         case 'sessionStatus':
@@ -132,7 +150,7 @@
       if (button === null) throw new Error('找不到悬浮入口按钮')
       button.click()
       await new Promise((resolve) => setTimeout(resolve, 60))
-      const row = document.querySelector('div[draggable="true"]')
+      const row = UNAUTH ? null : document.querySelector('div[draggable="true"]')
       if (row !== null) {
         row.click()
         await new Promise((resolve) => setTimeout(resolve, 80))

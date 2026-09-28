@@ -139,6 +139,14 @@ export function apply(ctx: ClientContext): void {
   let sidebarReady = false
   /** Set once the sidebar controller is visible; opens/focuses our tab. */
   let openSidebarTab: (() => void) | undefined
+  /**
+   * How far the sidebar registration got, surfaced in the panel footer.
+   *
+   * Three blind attempts at this failed, so the outcome is now *reported* rather
+   * than assumed: the user can read one line and we learn whether the service
+   * appeared, whether register threw, and whether openTab ran.
+   */
+  const sidebarState: { registered: boolean, opened: boolean, error?: string } = { registered: false, opened: false }
 
   /**
    * Services for the 处理/一键修复 buttons, captured when they become visible.
@@ -182,18 +190,28 @@ export function apply(ctx: ClientContext): void {
 
   // 1) the native tab type — this is what puts 「禅道」 in the sidebar's tab list
   ctx.effect(() => {
-    if (ctx.inject === undefined) return undefined
+    if (ctx.inject === undefined) {
+      sidebarState.error = '本宿主的客户端上下文没有 inject()'
+      return undefined
+    }
     return ctx.inject(['sidebarRightTabs'], (scoped) => {
       // Read as a PROPERTY: cordis' `get` is strict and throws when a service is
       // not visible, which made this registration silently never happen.
       const tabs = (scoped as unknown as { sidebarRightTabs?: NativeTabType }).sidebarRightTabs
         ?? (scoped.get?.('sidebarRightTabs') as NativeTabType | undefined)
-      if (tabs === undefined) return undefined
-      const dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
-      // From here on the right-edge button is redundant: the sidebar hosts the
-      // panel. It is kept only as a fallback for a host without that service.
-      sidebarReady = true
-      return () => { sidebarReady = false; dispose() }
+      if (tabs === undefined) {
+        sidebarState.error = 'sidebarRightTabs 服务对象为空'
+        return undefined
+      }
+      let dispose: (() => void) | undefined
+      try {
+        dispose = tabs.register({ id: SIDEBAR_TYPE, kind: SIDEBAR_KIND, title: () => '禅道' })
+        sidebarState.registered = true
+        sidebarReady = true
+      } catch (problem) {
+        sidebarState.error = (problem as Error).message
+      }
+      return () => { sidebarReady = false; dispose?.() }
     }) as () => void
   }, 'dsh-zentao-workbench: native sidebar tab')
 
@@ -209,10 +227,22 @@ export function apply(ctx: ClientContext): void {
     if (ctx.inject === undefined) return undefined
     return ctx.inject(['sidebarRight'], (scoped) => {
       const right = (scoped as unknown as { sidebarRight?: SidebarController }).sidebarRight
-      if (right?.openTab === undefined) return undefined
-      openSidebarTab = () => { right.openTab?.({ type: SIDEBAR_TYPE }) }
+      if (right?.openTab === undefined) {
+        sidebarState.error = sidebarState.error ?? 'sidebarRight.openTab 不可用'
+        return undefined
+      }
+      openSidebarTab = () => {
+        // The shipped contract opens a tab *for a session* ("calls openTab with
+        // that entry's Session id"), so pass the current one when we have it.
+        const current = (scoped as unknown as { sessions?: { list?: { getSnapshot?: () => { current?: string } } } })
+          .sessions?.list?.getSnapshot?.()?.current
+        right.openTab?.({ type: SIDEBAR_TYPE }, current)
+        sidebarState.opened = true
+      }
       // Auto-open once, so the entry is visible without hunting for it.
-      try { openSidebarTab() } catch { /* opening is best-effort */ }
+      try { openSidebarTab() } catch (problem) {
+        sidebarState.error = (problem as Error).message
+      }
       return () => { openSidebarTab = undefined }
     }) as () => void
   }, 'dsh-zentao-workbench: open the sidebar tab')
@@ -222,7 +252,13 @@ export function apply(ctx: ClientContext): void {
   //    sidebar.right.pane.tab and sidebar.right.pane.tab.title seats").
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     { name: 'sidebar.right.pane.tab', key: SIDEBAR_TYPE, inject: () => ({}) },
-    (props) => createElement(ZentaoPanel, { ...(props as Record<string, unknown>), ...base, variant: 'sidebar' }),
+    (props) => createElement(ZentaoPanel, {
+      ...(props as Record<string, unknown>),
+      ...base,
+      variant: 'sidebar',
+      // Reported here too: if the tab does open on some host, this line says so.
+      sidebarStatus: () => sidebarState,
+    }),
   )), 'dsh-zentao-workbench: sidebar pane body')
 
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
@@ -238,6 +274,7 @@ export function apply(ctx: ClientContext): void {
       ...base,
       openInSidebar,
       hasSidebar: () => sidebarReady,
+      sidebarStatus: () => sidebarState,
     }),
   ))
 }

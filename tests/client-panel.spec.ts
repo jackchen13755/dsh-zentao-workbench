@@ -176,8 +176,11 @@ function mount(
       workspaces,
       // Opt-in: with the sidebar service present the panel must NOT render its
       // floating entry (the sidebar hosts it), which would break every other test.
+      // Real shape of the tabs registry (read as a PROPERTY). No controller on
+      // purpose: clicking the entry must then still open the drawer, which is
+      // what lets this test read the status line at all.
       ...(options.sidebar === true
-        ? { get: (name: string) => (name === 'sidebarRightTabs' ? { register: () => () => undefined } : undefined) }
+        ? { sidebarRightTabs: { register: () => () => undefined } }
         : {}),
     }),
   }
@@ -471,7 +474,7 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(calls.filter((endpoint) => endpoint === 'resolveSubmit')).toHaveLength(2)
   })
 
-  it('hides its floating entry once the native sidebar hosts the panel', async () => {
+  it('keeps its entry and reports how far the sidebar registration got', async () => {
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
       if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
         return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
@@ -482,10 +485,17 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
       throw new Error(`unexpected endpoint ${endpoint}`)
     }
     const withSidebar = mount(rpc, undefined, { sidebar: true })
-    const tree = await withSidebar.settle()
-    // Nothing at all: no right-edge tab, and no drawer parked off-screen.
-    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeUndefined()
-    expect(find(tree, (element) => element.props['data-zentao-panel'] === '1')).toBeUndefined()
+    let tree = await withSidebar.settle()
+    // The entry stays: it is the only entry that has ever been confirmed to work
+    // on a real host, so it is not hidden on an unverified assumption.
+    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeDefined()
+    // …and once opened, the panel says how far the sidebar registration got
+    // (the footer only exists while the panel is open).
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await withSidebar.settle()
+    const status = find(tree, (element) => element.props['data-zentao-sidebar-status'] === '1')
+    expect(status).toBeDefined()
+    expect(textOf(status).join(' ')).toContain('已注册')
   })
 
   it('opens a detail card when a row is clicked', async () => {

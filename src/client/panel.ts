@@ -23,11 +23,15 @@ export interface PanelDeps {
   /** Open the native sidebar tab; returns false when this host has no sidebar. */
   openInSidebar?: () => boolean
   /**
-   * Whether the native sidebar is already hosting this panel. When it is, the
-   * right-edge tab is not rendered at all — it would be a second, redundant
-   * entry to the same workbench.
+   * Whether the native sidebar is already hosting this panel.
+   *
+   * Deliberately no longer used to *hide* the floating entry: the sidebar tab
+   * could not be confirmed in the real shell, and hiding the only working entry
+   * on an unverified assumption left the user with nothing to click.
    */
   hasSidebar?: () => boolean
+  /** What happened while registering the native sidebar tab (shown in the UI). */
+  sidebarStatus?: () => { registered: boolean, opened: boolean, error?: string }
   /**
    * One panel call. Implemented by the browser half as a POST to
    * {@link ZENTAO_FETCH_PATH} — the transport this Host actually mounts.
@@ -558,8 +562,6 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
-  // Sidebar hosts the panel → no floating entry, no drawer.
-  if (!inline && deps.hasSidebar?.() === true) return null
   if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true
@@ -987,6 +989,22 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   // messages go to the corner toast instead of replacing this line.
   const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8 } },
     createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
+    (() => {
+      // Rendered, not merely logged: this single line says how far the native
+      // sidebar registration got on THIS host, instead of leaving us to guess.
+      const status = deps.sidebarStatus?.()
+      if (status === undefined) return null
+      // Registered state first, then the reason: "registered but never opened"
+      // and "never registered" are different problems and must not read alike.
+      const base = status.registered
+        ? `侧边栏：已注册${status.opened ? '并已打开页签' : '（未打开）'}`
+        : '侧边栏：未注册（sidebarRightTabs 未出现）'
+      const text = status.error === undefined ? base : `${base}；${status.error}`
+      return createElement('span', {
+        'data-zentao-sidebar-status': '1',
+        style: { fontSize: 11, color: status.registered ? TOKEN.dim : '#b45309' },
+      }, text)
+    })(),
     createElement('span', { 'data-zentao-stamp': '1' }, stamp))
 
   // Right-edge drawer, mirroring the reference plugin's `panel`.

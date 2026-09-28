@@ -6,6 +6,7 @@ import {
   parseHistories,
   parseListTotal,
   parseProjectList,
+  extractDescription,
   severityLevelOf,
   parseResolveForm,
   parseTaskList,
@@ -136,6 +137,23 @@ describe('severity level', () => {
       bugRow({ id: '2', title: 'b', severity: '次要', severityLevel: 4 }),
     ])
     expect(parseBugList(html).map((row) => row.severityLevel)).toEqual([3, 4])
+  })
+})
+
+describe('extractDescription', () => {
+  it('takes the bug description only, never the detail_reason field or dead comments', () => {
+    // Real shape on this instance: the description, then 「bug详细原因」 rendered
+    // in another detail-content block, plus a commented-out copy of it.
+    const html = `
+      <div class="detail-title">bug描述</div>
+      <div class="detail-content article-content"><p>[步骤]</p><p>点一下</p></div>
+      <!-- <div class="detail-content article-content"><textarea name="detail_reason">x</textarea></div> -->
+      <div class="detail-title">bug详细原因</div>
+      <div class="detail-content article-content"><p><strong>[产生原因及改进]</strong>(开发填写)</p></div>`
+    const description = extractDescription(html)
+    expect(description).toContain('[步骤]')
+    expect(description).not.toContain('产生原因及改进')
+    expect(description).not.toContain('detail_reason')
   })
 })
 

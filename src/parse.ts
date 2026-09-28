@@ -368,17 +368,31 @@ export function lastResolvedBuild(html: string): string {
 }
 
 /**
+ * Remove HTML comments before anything reads the markup.
+ *
+ * Measured bug: ZenTao ships a **commented-out** copy of the 详细原因 block
+ * (`<!-- … <div class="detail-content">…<textarea name="detail_reason">… -->`).
+ * The extraction regex does not know about comments, so that dead markup was
+ * pulled into the panel and rendered — a readonly textarea full of the resolve
+ * template, which users read as "the raw HTML is showing again".
+ */
+export function stripComments(html: string): string {
+  return html.replace(/<!--[\s\S]*?-->/g, '')
+}
+
+/**
  * The description blocks of a bug page, as HTML.
  *
  * Measured markup: `<div class="detail-content article-content" …>…</div>`.
  */
 export function extractDescription(html: string): string {
-  const blocks: string[] = []
-  for (const m of html.matchAll(/<div[^>]*class=(['"])[^'"]*detail-content[^'"]*\1[^>]*>([\s\S]*?)<\/div>/g)) {
-    const body = (m[2] ?? '').trim()
-    if (body !== '') blocks.push(body)
-  }
-  return blocks.join('\n')
+  // The FIRST `detail-content` block is the bug's own description. The page also
+  // renders other fields in the same wrapper — measured on bug 55036: 5 blocks,
+  // where #2 and #4 are 「bug详细原因」 (`detail_reason`, the resolve-form value).
+  // Joining them all put that field's HTML template into the description, which
+  // users reported as "the raw HTML is showing again".
+  const first = stripComments(html).match(/<div[^>]*class=(['"])[^'"]*detail-content[^'"]*\1[^>]*>([\s\S]*?)<\/div>/)
+  return (first?.[2] ?? '').trim()
 }
 
 /**
@@ -389,8 +403,9 @@ export function extractDescription(html: string): string {
  * because tables/lists/images are the point of showing HTML at all.
  */
 export function sanitizeHtml(html: string): string {
-  return html
-    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+  return stripComments(html)
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|textarea|button|select)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(input|br\s*\/?|hr\s*\/?)\b[^>]*>/gi, (tag) => (/^<\s*br/i.test(tag) ? '<br />' : ''))
     .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>/gi, '')
     .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi, '')
     .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')

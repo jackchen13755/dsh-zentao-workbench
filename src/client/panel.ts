@@ -227,8 +227,11 @@ function compactHtml(html: string): string {
 
 /** Mirror of the host's sanitiser: no scripts, handlers or javascript: URLs. */
 function clientSanitize(html: string): string {
+  // Comments first: a commented-out block is dead markup, never content.
   return html
-    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|textarea|button|select)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(input|textarea|button|select)\b[^>]*>/gi, '')
     .replace(/<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>/gi, '')
     .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi, '')
     .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')

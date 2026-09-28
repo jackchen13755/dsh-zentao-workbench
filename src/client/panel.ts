@@ -210,6 +210,22 @@ const PANEL_CSS = `
 .zt-sec { padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
 .zt-label { font-size: 11px; color: var(--dsw-alias-label-secondary, #888); margin-bottom: 4px; }
 .zt-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.zt-tabs { display: flex; gap: 2px; padding: 6px 10px 0; }
+.zt-tab { border: none; background: none; color: var(--dsw-alias-label-secondary, #888); font-size: 12px; padding: 6px 10px 7px; cursor: pointer; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.zt-tab:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 5%, transparent); }
+.zt-tab-on { color: var(--dsw-alias-label-primary, #111); font-weight: 600; border-bottom-color: #2563eb; }
+.zt-dot { width: 7px; height: 7px; border-radius: 999px; flex: 0 0 auto; }
+.zt-dot-open { background: #f59e0b; }
+.zt-dot-done { background: #22c55e; }
+.zt-row-on { background: color-mix(in srgb, #2563eb 8%, transparent); }
+.zt-chev { opacity: 0; transition: opacity .12s ease; color: var(--dsw-alias-label-secondary, #888); font-size: 12px; }
+.zt-row:hover .zt-chev { opacity: 1; }
+.zt-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.zt-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 6px; font-size: 11px; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 5%, transparent); color: var(--dsw-alias-label-secondary, #777); }
+.zt-chip-warn { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #92400e; }
+.zt-hist { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l1, #eceff3); color: var(--dsw-alias-label-secondary, #888); font-size: 11px; line-height: 1.6; }
+.zt-desc { font-size: 12px; line-height: 1.65; border: 1px solid var(--dsw-alias-border-l1, #eceff3); border-radius: 10px; padding: 10px 12px; overflow-x: auto; background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 2%, transparent); }
+.zt-empty { padding: 28px 16px; text-align: center; color: var(--dsw-alias-label-secondary, #888); font-size: 12px; line-height: 1.8; }
 .zt-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); }
 `
 
@@ -751,15 +767,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         type: 'button',
         'data-zentao-tab': value,
         onClick: () => setTab(value),
-        style: {
-          cursor: 'pointer',
-          border: 'none',
-          background: 'none',
-          color: tab === value ? TOKEN.text : TOKEN.dim,
-          fontWeight: tab === value ? 600 : 400,
-          borderBottom: tab === value ? `2px solid ${TOKEN.accent}` : '2px solid transparent',
-          padding: '2px 6px',
-        },
+        className: tab === value ? 'zt-tab zt-tab-on' : 'zt-tab',
+        // 样式（hover/选中态）在 PANEL_CSS 里，内联样式表达不了。
+        style: { cursor: 'pointer' },
       }, value === 'bugs' ? '我的 Bug' : '任务'))))
 
     if (tab === 'tasks') {
@@ -997,10 +1007,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 style: { color: TOKEN.accent },
               }, selected.bug.story ?? '')),
         detailActions,
-        createElement('div', { style: { fontSize: 12 } },
-          `必填：${selected.resolve.fields.filter((field) => field.required).map((field) => field.label).join('、')}`),
-        createElement('div', { style: { fontSize: 12, color: TOKEN.dim, marginTop: 2 } },
-          `下拉规模 ${selected.resolve.optionCounts.resolvedBuild}/${selected.resolve.optionCounts.bugInchargedBy}/${selected.resolve.optionCounts.assignedTo}（已收敛）`),
+        createElement('div', { className: 'zt-chips' },
+          createElement('span', { className: 'zt-chip zt-chip-warn', title: '服务端必填项数量' },
+            `必填 ${selected.resolve.fields.filter((field) => field.required).length}`),
+          ...selected.resolve.fields.filter((field) => field.required).map((field) =>
+            createElement('span', { key: field.name, className: 'zt-chip' }, field.label)),
+          createElement('span', { className: 'zt-chip', title: '下拉规模：解决版本 / Bug所属人 / 指派给' },
+            `下拉 ${selected.resolve.optionCounts.resolvedBuild}/${selected.resolve.optionCounts.bugInchargedBy}/${selected.resolve.optionCounts.assignedTo}`)),
         ...(richDescription.trim() === ''
           ? []
           : [createElement('div', { key: 'desc', style: { marginTop: 8 } },
@@ -1010,11 +1023,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 // rendered as HTML so tables, lists and screenshots show properly.
                 'data-zentao-description': '1',
                 dangerouslySetInnerHTML: { __html: richDescription },
-                style: { fontSize: 12, lineHeight: 1.6, border: `1px solid ${TOKEN.line}`, borderRadius: 6, padding: '8px 10px', overflowX: 'auto' },
+                className: 'zt-desc',
               }, null))]),
         ...(selected.histories.length > 0
-          ? [createElement('div', { key: 'hist', style: { marginTop: 6, fontSize: 12, color: TOKEN.dim } },
-              createElement('div', { style: { fontSize: 11, marginBottom: 2 } }, '最近动态（按 HTML 渲染）'),
+          ? [createElement('div', { key: 'hist', className: 'zt-hist' },
+              createElement('div', { style: { fontSize: 11, marginBottom: 2, opacity: .8 } }, '最近动态'),
               ...selected.histories.map((line, index) => createElement('div', {
                 key: index,
                 // Rendered, not escaped: the host already stripped scripts and
@@ -1033,6 +1046,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           'data-zentao-list': '1',
           style: { position: 'absolute', inset: 0, overflowY: 'auto' },
         },
+      ...(visibleBugs.length > 0 ? [] : [createElement('div', { key: 'empty', className: 'zt-empty' },
+        search.trim() === ''
+          ? (bugs.length === 0 ? '没有取到 Bug（检查登录状态或范围）' : '这一页没有符合条件的 Bug')
+          : `没有匹配「${search.trim()}」的 Bug`)]),
       ...visibleBugs.map((bug) => createElement('div', {
         key: bug.id,
         'data-zentao-bug': bug.id,
@@ -1045,7 +1062,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           }))
         },
         onClick: () => void openDetail(bug.id),
-        className: 'zt-row',
+        className: checked.includes(bug.id) ? 'zt-row zt-row-on' : 'zt-row',
       },
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
         createElement('input', {
@@ -1058,13 +1075,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           onChange: () => toggleChecked(bug.id),
           style: { cursor: 'pointer', margin: 0 },
         }),
+        createElement('span', {
+          className: bug.resolution === '' ? 'zt-dot zt-dot-open' : 'zt-dot zt-dot-done',
+          title: bug.resolution === '' ? '未解决' : `已解决（${bug.resolution}）`,
+        }, null),
         severityBadge(bug.severity || '', bug.severityLevel),
         priBadge(bug.pri),
-        createElement('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bug.title)),
+        createElement('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bug.title),
+        createElement('span', { className: 'zt-chev' }, '›')),
       createElement('div', { className: 'zt-meta' },
         createElement('span', { className: 'zt-id' }, `#${bug.id}`),
         createElement('span', null, bug.type || '未分类'),
-        createElement('span', null, `指派 ${bug.assignedTo || '未指派'}`),
+        createElement('span', null, bug.assignedTo ? `指派 ${bug.assignedTo}` : '未指派'),
         bug.resolution === '' ? null : createElement('span', { className: 'zt-ok' }, `已解决 · ${bug.resolution}`))))),
         detailOverlay))
     }

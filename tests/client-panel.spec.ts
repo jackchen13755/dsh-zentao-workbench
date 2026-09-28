@@ -549,8 +549,10 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
 
     expect(calls).toContain('bugContext')
     const text = textOf(tree).join(' ')
-    expect(text).toContain('必填：代码变更影响范围')
-    expect(text).toContain('下拉规模 254/892/892')
+    // Required fields are chips now (count + labels) instead of a 「必填：…」 line.
+    expect(text).toContain('必填')
+    expect(text).toContain('代码变更影响范围')
+    expect(text).toContain('下拉 254/892/892')
     // The drag payload must carry a real origin, not a placeholder host.
     const payloads: string[] = []
     ;(row.props.onDragStart as (event: unknown) => void)({ dataTransfer: { setData: (_type: string, value: string) => payloads.push(value) } })

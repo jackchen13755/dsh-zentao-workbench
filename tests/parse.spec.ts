@@ -4,6 +4,7 @@ import {
   parseBugList,
   parseBugView,
   parseHistories,
+  parseListTotal,
   parseResolveForm,
   parseTaskList,
   resolveUid,
@@ -117,6 +118,18 @@ describe('parseResolveForm', () => {
     expect(form.defaults.resolvedBuild).toBe('build-7')
     expect(form.defaults.resolvedBuildText).toBe('build-7')
     expect(form.defaults.resolvedDate).toBe('2026-09-28 16:37:33')
+  })
+})
+
+describe('parseListTotal', () => {
+  it('reads the pager count, which is the only real total when a page is truncated', () => {
+    const html = bugListPage([bugRow({ id: '1', title: 'a' })], { recTotal: 137, recPerPage: 20 })
+    expect(parseListTotal(html)).toBe(137)
+    expect(parseBugList(html)).toHaveLength(1) // one page, but 137 exist
+  })
+
+  it('returns null when the page has no pager', () => {
+    expect(parseListTotal('<html><body>no pager</body></html>')).toBeNull()
   })
 })
 

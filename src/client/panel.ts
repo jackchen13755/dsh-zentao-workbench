@@ -27,6 +27,7 @@ interface Config {
   hasEnvCookie: boolean
   jarPaths: string[]
 }
+interface BugsPayload { bugs: BugRow[], total: number, truncated?: boolean, via: string }
 interface BugRow {
   id: string
   severity: string
@@ -117,6 +118,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [flash, setFlash] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [tab, setTab] = useState<'bugs' | 'tasks'>('bugs')
+  const [bugsTotal, setBugsTotal] = useState<{ total: number, truncated: boolean }>({ total: 0, truncated: false })
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [taskNote, setTaskNote] = useState('')
   const [account, setAccount] = useState('')
@@ -145,8 +147,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const refreshBugs = useCallback(async (force = false) => {
     setBusy('bugs')
     try {
-      const value = await call('listBugs', { limit: 30, only, refresh: force }) as { bugs: BugRow[] }
+      const value = await call('listBugs', { limit: 30, only, refresh: force }) as BugsPayload
       setBugs(value.bugs)
+      setBugsTotal({ total: value.total, truncated: value.truncated === true })
       setError('')
     } catch (problem) {
       setError((problem as Error).message)
@@ -419,6 +422,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('option', { value: '15' }, '15 分钟'),
         createElement('option', { value: '30' }, '30 分钟'),
         createElement('option', { value: '0' }, '不自动')),
+      bugsTotal.truncated
+        ? createElement('span', { style: { fontSize: 11, color: TOKEN.dim } }, `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}`)
+        : null,
       createElement('button', {
         type: 'button',
         'data-zentao-action': 'refresh',

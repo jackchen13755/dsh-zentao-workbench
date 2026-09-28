@@ -151,6 +151,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           return 0
         }
         io.out(`我的 Bug（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}\n`)
+        if (result.truncated) io.out(`  注意：本页只有 ${result.bugs.length} 条，实例共 ${result.total} 条；加大 --limit 或用面板查看\n`)
         for (const bug of result.bugs) {
           io.out(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}\n`)
         }

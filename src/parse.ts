@@ -174,6 +174,20 @@ export function parseBugList(html: string): BugRow[] {
   return rows
 }
 
+/**
+ * The pager's own record count — the authoritative total for a list page.
+ *
+ * Measured on 10.6: `<ul class='pager' data-rec-total='29' data-rec-per-page='1000' …>`.
+ * Without it a caller can only report how many rows this page carried, which
+ * silently becomes "the page size" the day the instance paginates.
+ */
+export function parseListTotal(html: string): number | null {
+  const m = html.match(/data-rec-total=(['"])(\d+)\1/)
+  if (!m?.[2]) return null
+  const value = Number(m[2])
+  return Number.isFinite(value) ? value : null
+}
+
 // --- project task list ------------------------------------------------------
 
 export interface TaskRow {

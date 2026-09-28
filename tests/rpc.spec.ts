@@ -67,6 +67,16 @@ describe('panel RPC channel', () => {
     expect(JSON.stringify(value)).not.toContain('zentaosid')
   })
 
+  it('reports the pager total and marks a truncated page', async () => {
+    const session = fakeSession(() => bugListPage([bugRow({ id: '1', title: 'a' })], { recTotal: 137, recPerPage: 20 }))
+    const handle = createZentaoRpcHandler({ session, workbench: new ZentaoWorkbench(session) })
+    const result = await handle('listBugs', {})
+    const value = (result as { value: { total: number, truncated: boolean, bugs: unknown[] } }).value
+    expect(value.bugs).toHaveLength(1)
+    expect(value.total).toBe(137)
+    expect(value.truncated).toBe(true)
+  })
+
   it('lists bugs for the panel', async () => {
     const { handle } = world()
     const result = await handle('listBugs', { limit: 5, only: 'open' })

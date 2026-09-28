@@ -13,7 +13,7 @@
  */
 
 import { FIELD_LABELS, RESOLVE_FIELD_RULES } from './fields.js'
-import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type SelectOption, type TaskRow } from './parse.js'
+import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseListTotal, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type SelectOption, type TaskRow } from './parse.js'
 import { planResolve, submitResolve, type ResolveArgs, type ResolvePlan, type SubmitOutcome } from './resolve.js'
 import type { StrategyId, ZenTaoSession } from './session.js'
 
@@ -21,7 +21,10 @@ export { RESOLVE_FIELD_RULES } from './fields.js'
 
 export interface MyBugsResult {
   bugs: BugRow[]
+  /** The pager's own count when the page exposes it, else the rows on this page. */
   total: number
+  /** True when this page holds fewer rows than `total` (caller should not read it as "everything"). */
+  truncated: boolean
   via: StrategyId
   url: string
   fetchedAt: string
@@ -113,11 +116,13 @@ export class ZentaoWorkbench {
     if (!cached) {
       const page = await this.session.get('/index.php?m=my&f=bug')
       const bugs = parseBugList(page.body)
+      const pagerTotal = parseListTotal(page.body)
       this.list = {
         at: Date.now(),
         value: {
           bugs,
-          total: bugs.length,
+          total: pagerTotal ?? bugs.length,
+          truncated: pagerTotal !== null && pagerTotal > bugs.length,
           via: page.strategy,
           url: page.url,
           fetchedAt: new Date().toISOString(),
@@ -147,9 +152,10 @@ export class ZentaoWorkbench {
     const page = await this.session.get(`/index.php?m=project&f=task${query}`)
     const tasks = parseTaskList(page.body)
     const empty = taskListEmpty(page.body) || tasks.length === 0
+    const pagerTotal = parseListTotal(page.body)
     return {
       tasks: tasks.slice(0, limit),
-      total: tasks.length,
+      total: pagerTotal ?? tasks.length,
       empty,
       ...(options.projectID !== undefined ? { projectID: options.projectID } : {}),
       via: page.strategy,

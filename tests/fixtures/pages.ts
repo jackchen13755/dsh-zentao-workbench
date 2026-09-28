@@ -32,8 +32,11 @@ export function bugRow(options: {
 </tr>`
 }
 
-export function bugListPage(rows: string[]): string {
+export function bugListPage(rows: string[], options: { recTotal?: number, recPerPage?: number } = {}): string {
+  const recTotal = options.recTotal ?? rows.length
+  const recPerPage = options.recPerPage ?? 1000
   return `<!DOCTYPE html><html><head><title>我的地盘::我的Bug - 禅道</title></head><body>
+<ul class='pager' data-page-cookie='pagerMyBug' data-ride='pager' data-rec-total='${recTotal}' data-rec-per-page='${recPerPage}' data-page='1' data-link-creator='/index.php?m=my&f=bug&recTotal=${recTotal}&recPerPage={recPerPage}&pageID={page}'></ul>
 <div id="mainContent"><table class='table table-condensed table-hover table-striped tablesorter' id='bugList'>
 <thead><tr><th>ID</th><th>级别</th><th>P</th><th>类型</th><th>Bug标题</th><th>创建</th><th>指派给</th><th>解决</th><th>方案</th><th>操作</th></tr></thead>
 <tbody>${rows.join('\n')}</tbody></table></div></body></html>`

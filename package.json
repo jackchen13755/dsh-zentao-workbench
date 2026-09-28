@@ -6,12 +6,14 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "bin",
     "cordis.patch.yml"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "zentao": "node bin/zentao.mjs"
   },
   "keywords": [
     "dsh-plugin",
@@ -47,5 +49,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jackchen13755/dsh-zentao-workbench.git"
+  },
+  "bin": {
+    "zentao": "./bin/zentao.mjs"
   }
 }

@@ -59,7 +59,21 @@ export interface ResolvePlan {
 
 /** Curated enums, mirrored from the form so error messages can list the valid set. */
 export const RESOLUTION_CODES = ['bydesign', 'duplicate', 'external', 'fixed', 'notrepro', 'postponed', 'willnotfix'] as const
-export const REASON_CODES = ['codeBug', 'designBug', 'configBug', 'installBug', 'performanceBug', 'standardBug', 'securityBug', 'otherBug', 'externalReason'] as const
+/**
+ * Measured on the instance (`option value`s of the 原因 select). Kept verbatim
+ * including its own spelling, because that is what the server accepts — note
+ * `requirmentLogic`, not `requirementLogic`.
+ */
+export const REASON_CODES = [
+  'codeBug',
+  'requirmentLogic',
+  'requirmentChange',
+  'newRequirement',
+  'requirementMiss',
+  'Environment',
+  'ThirdParty',
+  'InvalidBug',
+] as const
 
 /** Count like PHP's `mb_strlen`: by code point, so emoji are not double-counted. */
 export function charLength(value: string): number {

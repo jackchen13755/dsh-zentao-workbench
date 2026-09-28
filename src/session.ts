@@ -78,13 +78,15 @@ export class ZenTaoSession {
   private lastProbe: { at: number, status: SessionStatus } | null = null
 
   constructor(options: SessionOptions = {}) {
-    this.server = normalizeServer(options.server ?? options.env?.ZENTAO_BASE ?? '')
-    this.bridgeUrl = options.bridgeUrl ?? options.env?.DAEMON_URL ?? DEFAULT_BRIDGE_URL
+    // Resolve the environment first: `server`/`bridgeUrl` read from it, and an
+    // earlier draft assigned it afterwards, which silently ignored ZENTAO_BASE.
+    this.env = options.env ?? process.env
+    this.server = normalizeServer(options.server ?? this.env.ZENTAO_BASE ?? '')
+    this.bridgeUrl = options.bridgeUrl ?? this.env.DAEMON_URL ?? DEFAULT_BRIDGE_URL
     this.jarPaths = [
       ...(options.manualJarPath ? [options.manualJarPath] : []),
       ...(options.jarPaths ?? defaultJarPaths()),
     ]
-    this.env = options.env ?? process.env
     this.probeTtlMs = options.probeTtlMs ?? 30_000
   }
 
@@ -207,7 +209,7 @@ export class ZenTaoSession {
     if (!daemon.ok) {
       probes.push({ id: 'bridge', label: LABELS.bridge, ready: false, detail: `守护进程不可达：${daemon.error ?? '未知错误'}`, hint: BRIDGE_DOWN_HINT })
     } else if (!daemon.running) {
-      probes.push({ id: 'bridge', label: LABELS.bridge, ready: true, detail: '守护进程在运行，但没有扩展在轮询', hint: BRIDGE_IDLE_HINT })
+      probes.push({ id: 'bridge', label: LABELS.bridge, ready: true, detail: '守护进程在运行；扩展轮询标志为 false（该标志不可靠，以实测为准）', hint: BRIDGE_IDLE_HINT })
     } else {
       probes.push({ id: 'bridge', label: LABELS.bridge, ready: true, detail: `守护进程在运行（pid ${daemon.pid ?? '?'}），扩展已连接` })
     }
@@ -229,9 +231,35 @@ export class ZenTaoSession {
       ? { id: 'manual', label: LABELS.manual, ready: true, detail: '检测到 ZENTAO_COOKIE' }
       : { id: 'manual', label: LABELS.manual, ready: false, detail: '未提供 ZENTAO_COOKIE', hint: '把 Cookie 串放进环境变量 ZENTAO_COOKIE（不要写进插件配置）' })
 
-    const status: SessionStatus = { server: this.server, authenticated: false, probes }
-    this.lastProbe = { at: Date.now(), status }
-    return status
+    // The daemon's own `running` flag is not proof that a request will work —
+    // measured: it reported "no extension polling" while bridge fetches were
+    // succeeding, which made this panel claim "未登录" on a working session.
+    // The only trustworthy probe is an actual page.
+    try {
+      const page = await this.request('/index.php?m=my&f=bug', { method: 'GET' })
+      const status: SessionStatus = {
+        server: this.server,
+        authenticated: true,
+        strategy: page.strategy,
+        probes: [...probes, {
+          id: page.strategy,
+          label: LABELS[page.strategy],
+          ready: true,
+          detail: '实测通过：已取到「我的 Bug」页面',
+        }],
+      }
+      this.lastProbe = { at: Date.now(), status }
+      return status
+    } catch (error) {
+      const failureProbes = error instanceof ZenTaoAuthError ? error.status.probes : []
+      const status: SessionStatus = {
+        server: this.server,
+        authenticated: false,
+        probes: failureProbes.length > 0 ? [...probes, ...failureProbes] : probes,
+      }
+      this.lastProbe = { at: Date.now(), status }
+      return status
+    }
   }
 
   private order(): StrategyId[] {

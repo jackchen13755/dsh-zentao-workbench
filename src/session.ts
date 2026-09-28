@@ -87,8 +87,14 @@ export class ZenTaoSession {
     this.env = options.env ?? process.env
     this.server = normalizeServer(options.server ?? this.env.ZENTAO_BASE ?? '')
     this.bridgeUrl = options.bridgeUrl ?? this.env.DAEMON_URL ?? DEFAULT_BRIDGE_URL
+    // Precedence: explicit option → ZENTAO_COOKIE_JAR (the variable this
+    // ecosystem's own tools export to) → the conventional default locations.
+    // Regression: the env var was documented but never read, so a fresh export
+    // pointed at it was silently ignored and only the stale default jar was used.
+    const envJar = this.env.ZENTAO_COOKIE_JAR?.trim() ?? ''
     this.jarPaths = [
       ...(options.manualJarPath ? [options.manualJarPath] : []),
+      ...(envJar !== '' ? [envJar] : []),
       ...(options.jarPaths ?? defaultJarPaths()),
     ]
     this.probeTtlMs = options.probeTtlMs ?? 30_000

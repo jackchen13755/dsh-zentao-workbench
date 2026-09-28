@@ -45,6 +45,19 @@ describe('ZenTaoSession configuration', () => {
     expect(renderStatus(status)).toContain('ZENTAO_BASE')
   })
 
+  it('honours ZENTAO_COOKIE_JAR (documented, and what the sibling tools export)', () => {
+    const withEnv = new ZenTaoSession({
+      env: env({ ZENTAO_BASE: 'https://zt.example.com', ZENTAO_COOKIE_JAR: '~/zt/cookies.txt' }),
+    })
+    expect(withEnv.jarPathsForDisplay()[0]).toBe('~/zt/cookies.txt')
+    // …and an explicit --cookie-jar still wins over the environment.
+    const withOption = new ZenTaoSession({
+      env: env({ ZENTAO_BASE: 'https://zt.example.com', ZENTAO_COOKIE_JAR: '~/zt/cookies.txt' }),
+      manualJarPath: '/explicit/jar.txt',
+    })
+    expect(withOption.jarPathsForDisplay().slice(0, 2)).toEqual(['/explicit/jar.txt', '~/zt/cookies.txt'])
+  })
+
   it('takes the bridge url from DAEMON_URL and the jar path from options', () => {
     const session = new ZenTaoSession({
       env: env({ ZENTAO_BASE: 'https://zt.example.com', DAEMON_URL: 'http://127.0.0.1:9999' }),

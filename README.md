@@ -74,6 +74,18 @@ zentao login --account A          # 口令读 ZENTAO_PASSWORD 或 --password-std
 CLI 管理的 profile 用 `dsh plugin --profile web add <dir>`；`desktop` profile 由 Electron 独占，
 按 `package.json` 的 `dependencies` 加 `link:` + `cordis.patch.yml` 里加一行（`name: dsh-zentao-workbench`）接线，重启生效。
 
+## 四策略的验证矩阵（真实实例，逐条隔离实测）
+
+| 策略 | 状态 | 隔离条件与结果 |
+|---|---|---|
+| ① 浏览器插件桥 | ✅ 实测 | 正常环境：`bugs` 经「bridge」取到 29 条（273ms） |
+| ② Chrome cookie 导出 | ✅ 实测 | 桥指到死端口（`DAEMON_URL=http://127.0.0.1:9`）、无注入、无账密 → 仍报「已登录 · 走 Chrome cookie 导出」并取到 29 条 |
+| ③ 表单账密登录 | ⚠ 部分 | 失败路径实测（服务端判词原文回显）；**成功路径需真口令，未验** |
+| ④ 手工注入 | ✅ 实测 | 桥死 + jar 为过期文件 → 经「manual」取到数据 |
+
+顺带实测到一次真实的降级：默认 jar（9/23 导出、`zentaosid` 会话级）已失效时，
+会话不会报"未登录"了事，而是标记该策略失效并落到下一条 —— 这正是设计要的行为。
+
 ## 写路径怎么验证（不改动任何单据）
 
 所有写路径默认只跑 `dryRun`。要证明真实 POST 也能工作，用这个探针 —— 它走生产代码

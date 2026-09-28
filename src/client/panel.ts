@@ -16,6 +16,9 @@ import type { ZentaoCallResult as RpcResult } from '../protocol.js'
 /** Injected by scripts/bundle-client.mjs at build time. */
 declare const __BUILD_STAMP__: string
 
+/** Minimal shape for inline style objects (no React type dependency). */
+type CSSProperties = Record<string, string | number>
+
 export interface PanelDeps {
   /**
    * Where the panel is rendered:
@@ -119,9 +122,8 @@ function toneBadge(text: string, tone: SeverityTone, attrs: Record<string, strin
   if (label === '') return null
   return createElement('span', {
     ...attrs,
-    className: 'zt-pill',
+    style: { ...PILL, background: tone.bg, color: tone.fg },
     title: hint,
-    style: { background: tone.bg, color: tone.fg },
   }, label)
 }
 
@@ -158,7 +160,11 @@ const DISCIPLINE = [
 ].join('\n')
 
 /**
- * The panel's stylesheet.
+ * The panel's stylesheet — kept for hover/sticky niceties only.
+ *
+ * The load-bearing look lives in the inline style objects above: measured on the
+ * user's shell, inline styles apply while this sheet does not (CSP allowing
+ * `style-src-attr` but not `style-src-elem`). Never move anything essential here.
  *
  * Inline styles cannot express `:hover`, a sticky header or a pill radius, and
  * the panel is injected into someone else's DOM — so it ships one scoped sheet
@@ -213,6 +219,7 @@ function clientSanitize(html: string): string {
     .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
     .replace(/(href|src)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
 }
+
 
 const PANEL_CSS = `
 .zt-row { display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eceff3); cursor: grab; transition: background .12s ease; }
@@ -297,6 +304,30 @@ const TOKEN = {
   danger: '#dc2626',
   ok: '#16a34a',
 }
+
+/**
+ * Inline style objects for the pieces the CSS sheet used to carry.
+ *
+ * Measured on the user's shell: inline styles apply (badge colours show) but the
+ * injected `<style>` sheet does not — consistent with a CSP that allows
+ * `style-src-attr` while blocking `style-src-elem`. So the load-bearing look is
+ * expressed as attributes, and hover/sticky niceties stay optional in the sheet.
+ */
+const BTN: CSSProperties = { height: 26, padding: '0 10px', borderRadius: 7, border: `1px solid ${TOKEN.line}`, background: 'transparent', color: 'inherit', fontSize: 12, cursor: 'pointer' }
+const BTN_PRIMARY: CSSProperties = { ...BTN, borderColor: TOKEN.accent, color: TOKEN.accent, fontWeight: 600 }
+const FIELD: CSSProperties = { height: 26, borderRadius: 7, border: `1px solid ${TOKEN.line}`, background: 'transparent', color: 'inherit', fontSize: 12, padding: '0 8px' }
+const PILL: CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 30, height: 17, padding: '0 7px', borderRadius: 999, fontSize: 11, fontWeight: 600 }
+const CHIP: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 20, padding: '0 8px', borderRadius: 6, fontSize: 11, color: TOKEN.dim, background: 'rgba(127,127,127,.10)' }
+const ROW: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '9px 12px', borderBottom: `1px solid ${TOKEN.line}`, cursor: 'grab' }
+const ROW_ON: CSSProperties = { ...ROW, background: 'rgba(37,99,235,.08)' }
+const META: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 11, color: TOKEN.dim }
+const SEARCH_BAR: CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, margin: '10px 12px 0', padding: '0 9px', height: 32, borderRadius: 9, border: `1px solid ${TOKEN.line}`, background: 'rgba(127,127,127,.05)' }
+const BATCH_BAR: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, margin: '8px 12px 0', padding: '5px 8px 5px 10px', borderRadius: 9, border: '1px solid rgba(37,99,235,.32)', background: 'rgba(37,99,235,.08)' }
+const BACK_PILL: CSSProperties = { ...BTN, borderRadius: 999, padding: '0 10px 0 7px', display: 'inline-flex', alignItems: 'center', gap: 5 }
+const TAB: CSSProperties = { border: 'none', background: 'none', color: TOKEN.dim, fontSize: 12, padding: '6px 10px 7px', cursor: 'pointer', borderBottom: '2px solid transparent' }
+const TAB_ON: CSSProperties = { ...TAB, color: TOKEN.text, fontWeight: 600, borderBottom: `2px solid ${TOKEN.accent}` }
+const SEC: CSSProperties = { padding: '10px 12px', borderBottom: `1px solid ${TOKEN.line}` }
+
 
 const box: Record<string, unknown> = {
   background: TOKEN.bg,
@@ -813,9 +844,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         type: 'button',
         'data-zentao-tab': value,
         onClick: () => setTab(value),
-        className: tab === value ? 'zt-tab zt-tab-on' : 'zt-tab',
-        // 样式（hover/选中态）在 PANEL_CSS 里，内联样式表达不了。
-        style: { cursor: 'pointer' },
+        style: tab === value ? TAB_ON : TAB,
       }, value === 'bugs' ? '我的 Bug' : '任务'))))
 
     if (tab === 'tasks') {
@@ -828,11 +857,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           : createElement('div', { style: { color: TOKEN.dim, fontSize: 11, marginTop: 8 } }, taskNote)))
     }
 
-    if (tab === 'bugs') body.push(createElement('div', { key: 'search', className: 'zt-search' },
+    if (tab === 'bugs') body.push(createElement('div', { key: 'search', style: SEARCH_BAR },
       // Vector, not the ⌕ glyph: the glyph's size varies with the system font and
       // could not be enlarged cleanly (user asked for a bigger icon).
       createElement('svg', {
-        className: 'zt-search-icon',
+        style: { flex: '0 0 auto', width: 17, height: 17, opacity: .55, color: TOKEN.dim },
         viewBox: '0 0 16 16',
         width: 17,
         height: 17,
@@ -854,13 +883,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       // The hit count belongs next to what produced it, not in the toolbar below.
       search.trim() === ''
         ? null
-        : createElement('span', { className: 'zt-chip', title: '命中 / 本页总数' }, `${visibleBugs.length}/${bugs.length}`),
+        : createElement('span', { style: CHIP, title: '命中 / 本页总数' }, `${visibleBugs.length}/${bugs.length}`),
       search.trim() === ''
         ? null
         : createElement('button', {
             type: 'button',
             'data-zentao-action': 'clear-search',
-            className: 'zt-search-clear',
+            style: { border: 'none', background: 'transparent', color: 'inherit', opacity: .5, cursor: 'pointer', fontSize: 11, padding: '4px 5px' },
             title: '清空搜索（Esc）',
             onClick: () => setSearch(''),
           }, '✕')))
@@ -876,10 +905,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         ? (sortAsc ? '高 → 低' : '低 → 高')
         : (sortAsc ? '旧 → 新' : '新 → 旧')
       const allOn = visibleBugs.length > 0 && visibleBugs.every((bug) => checked.includes(bug.id))
-      body.push(createElement('div', { key: 'toolbar', className: 'zt-toolbar' },
+      body.push(createElement('div', { key: 'toolbar', style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}` } },
         createElement('select', {
           'data-zentao-scope': '1',
-          className: 'zt-field',
+          style: FIELD,
           title: '范围：我的 Bug，或某个项目里的 Bug',
           value: scope,
           onChange: (event: { target: { value: string } }) => setScope(event.target.value === 'project' ? 'project' : 'mine'),
@@ -889,17 +918,16 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         scope === 'project'
           ? createElement('select', {
               'data-zentao-project': '1',
-              className: 'zt-field',
+              style: { ...FIELD, flex: 1, minWidth: 120 },
               title: '选择项目（列表来自禅道项目索引）',
               value: projectID,
               onChange: (event: { target: { value: string } }) => setProjectID(event.target.value),
-              style: { flex: 1, minWidth: 120 },
             },
             createElement('option', { value: '' }, projects.length === 0 ? '（加载项目…）' : '选择项目…'),
             ...projects.map((project) => createElement('option', { key: project.id, value: project.id }, `${project.name}（${project.id}）`)))
           : null,
         createElement('select', {
-          className: 'zt-field',
+          style: FIELD,
           title: '只看未解决，或全部',
           value: only,
           onChange: (event: { target: { value: string } }) => setOnly(event.target.value as 'all' | 'open'),
@@ -910,7 +938,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         // 选起来费眼；方向按钮还能一眼看出当前朝哪边。
         createElement('select', {
           'data-zentao-sort': '1',
-          className: 'zt-field',
+          style: FIELD,
           title: '排序字段（服务端排序，值经宿主白名单校验）',
           value: sortField,
           onChange: (event: { target: { value: string } }) => setOrderBy(`${event.target.value}_${sortAsc ? 'asc' : 'desc'}`),
@@ -920,12 +948,12 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('button', {
           type: 'button',
           'data-zentao-action': 'sort-dir',
-          className: 'zt-btn',
+          style: BTN,
           title: `排序方向：${dirHint}（点击切换）`,
           onClick: () => setOrderBy(`${sortField}_${sortAsc ? 'desc' : 'asc'}`),
         }, sortAsc ? '↑' : '↓'),
         createElement('select', {
-          className: 'zt-field',
+          style: FIELD,
           title: '自动刷新间隔',
           value: String(intervalMin),
           onChange: (event: { target: { value: string } }) => setIntervalMin(Number(event.target.value)),
@@ -935,13 +963,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           createElement('option', { value: '15' }, '15 分钟'),
           createElement('option', { value: '30' }, '30 分钟'),
           createElement('option', { value: '0' }, '不自动')),
-        createElement('span', { className: 'zt-toolbar-note' },
+        createElement('span', { style: { fontSize: 11, color: TOKEN.dim } },
           [
             scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
             bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
           ].filter((part) => part !== '').join(' · ')),
         createElement('label', {
-          className: allOn ? 'zt-checkall zt-checkall-on' : 'zt-checkall',
+          style: { display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, padding: '0 9px', borderRadius: 999, border: `1px solid ${allOn ? TOKEN.accent : TOKEN.line}`, fontSize: 11, color: allOn ? TOKEN.accent : TOKEN.dim, cursor: 'pointer', fontWeight: allOn ? 600 : 400 },
           title: '全选/取消当前可见的行',
         },
           createElement('input', {
@@ -958,7 +986,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('button', {
           type: 'button',
           'data-zentao-action': 'refresh',
-          className: 'zt-btn',
+          style: BTN,
           title: `刷新状态、列表、详情与计划（自动刷新：${intervalMin === 0 ? '关闭' : `${intervalMin} 分钟`}）`,
           onClick: () => void refreshAll(true),
         }, busy === 'all' || busy === 'bugs' ? '↻ 刷新中…' : '↻ 刷新')))
@@ -968,18 +996,18 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       body.push(createElement('div', {
         key: 'batch',
         'data-zentao-batch': '1',
-        className: 'zt-batch',
+        style: BATCH_BAR,
       },
       // Short labels + tooltips: four long labels wrapped onto two lines in a
       // 384px pane, pushing the list down every time something was ticked.
-      createElement('span', { className: 'zt-batch-count' }, `已选 ${checked.length}`),
-      createElement('button', { type: 'button', className: 'zt-btn', 'data-zentao-action': 'batch-preview', title: '批量预览：对每条跑一次解决计划（只读，不提交），汇总哪些可提交、哪些被拦', onClick: () => void batchPreview() }, '预览'),
-      createElement('button', { type: 'button', className: 'zt-btn zt-btn-primary', 'data-zentao-action': 'batch-resolve', title: '批量解决：逐条提交（会二次确认并列出单号；每条都回读状态确认）', onClick: () => void batchResolve() }, '解决'),
-      createElement('button', { type: 'button', className: 'zt-btn', 'data-zentao-action': 'batch-quote', title: '批量引用到会话：新建一个会话，把这 N 条的引用一起发过去（不写禅道）', onClick: () => void batchQuote() }, '引用'),
-      batchProgress === '' ? null : createElement('span', { className: 'zt-chip' }, batchProgress),
+      createElement('span', { style: { fontSize: 11, fontWeight: 600, color: '#1d4ed8', whiteSpace: 'nowrap' } }, `已选 ${checked.length}`),
+      createElement('button', { type: 'button', style: BTN, 'data-zentao-action': 'batch-preview', title: '批量预览：对每条跑一次解决计划（只读，不提交），汇总哪些可提交、哪些被拦', onClick: () => void batchPreview() }, '预览'),
+      createElement('button', { type: 'button', style: BTN_PRIMARY, 'data-zentao-action': 'batch-resolve', title: '批量解决：逐条提交（会二次确认并列出单号；每条都回读状态确认）', onClick: () => void batchResolve() }, '解决'),
+      createElement('button', { type: 'button', style: BTN, 'data-zentao-action': 'batch-quote', title: '批量引用到会话：新建一个会话，把这 N 条的引用一起发过去（不写禅道）', onClick: () => void batchQuote() }, '引用'),
+      batchProgress === '' ? null : createElement('span', { style: CHIP }, batchProgress),
       createElement('button', {
         type: 'button',
-        className: 'zt-batch-clear',
+        style: { marginLeft: 'auto', border: 'none', background: 'transparent', color: TOKEN.dim, cursor: 'pointer', fontSize: 11, padding: '5px 6px' },
         'data-zentao-action': 'batch-clear',
         title: '清空选择',
         onClick: () => setChecked([]),
@@ -998,14 +1026,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         style: { position: 'sticky', top: 0, zIndex: 2, padding: '8px 12px', borderBottom: `1px solid ${TOKEN.line}`,
                  background: TOKEN.bg } },
         createElement('div', { className: 'zt-actions' },
-          createElement('button', { type: 'button', draggable: true, className: 'zt-btn', style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
-          createElement('button', { type: 'button', className: 'zt-btn', onClick: () => void insert(referenceOf(selected.bug), '引用') }, '复制引用'),
+          createElement('button', { type: 'button', draggable: true, style: { cursor: 'grab' }, onDragStart: (event: { dataTransfer?: { setData(t: string, v: string): void } }) => event.dataTransfer?.setData('text/plain', referenceOf(selected.bug)) }, '拖我引用'),
+          createElement('button', { type: 'button', style: BTN, onClick: () => void insert(referenceOf(selected.bug), '引用') }, '复制引用'),
           createElement('button', {
             type: 'button',
             'data-zentao-action': 'plan',
             title: '第 1 步：按表单默认值生成解决计划（只读，不会提交）',
             onClick: () => void previewPlan(selected.bug.id),
-            className: 'zt-btn zt-btn-primary',
+            style: BTN_PRIMARY,
           }, busy === 'plan' ? '生成中…' : '① 预览解决计划'),
           // 「一键修复」 is the one people press most, so it leads and is styled as
           // the primary action of the card.
@@ -1013,7 +1041,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             type: 'button',
             'data-zentao-action': 'one-click-fix',
             title: '新建会话并把这条 Bug 连同「复现→定位→最小修复→自测→先 dryRun 再提交」的提示词一次发出',
-            className: 'zt-btn zt-btn-primary',
+            style: BTN_PRIMARY,
             onClick: async () => {
               const preset = ROLE_PRESETS.find((role) => role.key === 'fix')!
               try {
@@ -1032,7 +1060,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
             // the bug reference plus that role's preset prompt — nothing is written
             // to ZenTao.
             title: `新建一个会话，把这条 Bug 的引用 + 「${role.label}」视角的预设提示词发过去（只开对话，不改单）`,
-            className: 'zt-btn',
+            style: BTN,
             onClick: async () => {
               try {
                 await deps.handlePrompt(role.prompt(referenceOf(selected.bug)))
@@ -1090,13 +1118,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       createElement('button', {
         type: 'button',
         'data-zentao-action': 'close-detail',
-        className: 'zt-back',
+        style: BACK_PILL,
         title: '返回列表',
         onClick: () => { setSelected(null); setPlan(null) },
       },
-        createElement('span', { className: 'zt-back-arrow', 'aria-hidden': 'true' }, '←'),
+        createElement('span', { style: { fontSize: 13, lineHeight: 1 }, 'aria-hidden': 'true' }, '←'),
         createElement('span', null, '返回')),
-      createElement('span', { className: 'zt-id zt-chip' }, `#${selected.bug.id}`),
+      createElement('span', { style: { ...CHIP, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, `#${selected.bug.id}`),
       createElement('span', { style: { flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, selected.bug.title)),
       createElement('div', { style: { padding: '10px 12px' } },
         createElement('div', { style: { color: TOKEN.dim, fontSize: 12, margin: '4px 0', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
@@ -1116,12 +1144,12 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 style: { color: TOKEN.accent },
               }, selected.bug.story ?? '')),
         detailActions,
-        createElement('div', { className: 'zt-chips' },
+        createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 } },
           createElement('span', { className: 'zt-chip zt-chip-warn', title: '服务端必填项数量' },
             `必填 ${selected.resolve.fields.filter((field) => field.required).length}`),
           ...selected.resolve.fields.filter((field) => field.required).map((field) =>
-            createElement('span', { key: field.name, className: 'zt-chip' }, field.label)),
-          createElement('span', { className: 'zt-chip', title: '下拉规模：解决版本 / Bug所属人 / 指派给' },
+            createElement('span', { key: field.name, style: CHIP }, field.label)),
+          createElement('span', { style: CHIP, title: '下拉规模：解决版本 / Bug所属人 / 指派给' },
             `下拉 ${selected.resolve.optionCounts.resolvedBuild}/${selected.resolve.optionCounts.bugInchargedBy}/${selected.resolve.optionCounts.assignedTo}`)),
         ...(richDescription.trim() === ''
           ? []
@@ -1132,10 +1160,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
                 // rendered as HTML so tables, lists and screenshots show properly.
                 'data-zentao-description': '1',
                 dangerouslySetInnerHTML: { __html: richDescription },
-                className: 'zt-desc',
+                style: { fontSize: 12, lineHeight: 1.65, border: `1px solid ${TOKEN.line}`, borderRadius: 10, padding: '10px 12px', overflowX: 'auto', background: 'rgba(127,127,127,.04)' },
               }, null))]),
         ...(selected.histories.length > 0
-          ? [createElement('div', { key: 'hist', className: 'zt-hist' },
+          ? [createElement('div', { key: 'hist', style: { marginTop: 6, paddingLeft: 8, borderLeft: `2px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, lineHeight: 1.6 } },
               createElement('div', { style: { fontSize: 11, marginBottom: 2, opacity: .8 } }, '最近动态'),
               ...selected.histories.map((line, index) => createElement('div', {
                 key: index,
@@ -1155,7 +1183,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           'data-zentao-list': '1',
           style: { position: 'absolute', inset: 0, overflowY: 'auto' },
         },
-      ...(visibleBugs.length > 0 ? [] : [createElement('div', { key: 'empty', className: 'zt-empty' },
+      ...(visibleBugs.length > 0 ? [] : [createElement('div', { key: 'empty', style: { padding: '28px 16px', textAlign: 'center', color: TOKEN.dim, fontSize: 12, lineHeight: 1.8 } },
         search.trim() === ''
           ? (bugs.length === 0 ? '没有取到 Bug（检查登录状态或范围）' : '这一页没有符合条件的 Bug')
           : `没有匹配「${search.trim()}」的 Bug`)]),
@@ -1171,7 +1199,7 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           }))
         },
         onClick: () => void openDetail(bug.id),
-        className: checked.includes(bug.id) ? 'zt-row zt-row-on' : 'zt-row',
+        style: checked.includes(bug.id) ? ROW_ON : ROW,
       },
       createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
         createElement('input', {
@@ -1191,8 +1219,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         severityBadge(bug.severity || '', bug.severityLevel),
         priBadge(bug.pri),
         createElement('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bug.title),
-        createElement('span', { className: 'zt-chev' }, '›')),
-      createElement('div', { className: 'zt-meta' },
+        createElement('span', { style: { opacity: .45, color: TOKEN.dim, fontSize: 12 } }, '›')),
+      createElement('div', { style: META },
         createElement('span', { className: 'zt-id' }, `#${bug.id}`),
         createElement('span', null, bug.type || '未分类'),
         createElement('span', null, bug.assignedTo ? `指派 ${bug.assignedTo}` : '未指派'),
@@ -1247,13 +1275,12 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           'data-zentao-action': 'open-in-sidebar',
           // Escape hatch that does not depend on finding the guide capsule: the
           // sidebar's own navigation controller opens our page directly.
-          className: 'zt-btn',
+          style: { ...BTN, cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
           title: '在右侧边栏里打开禅道工作台（不经过指南胶囊）',
           onClick: () => {
             if (deps.openInSidebar?.() === true) setFlash('已在侧边栏打开')
             else setError('侧边栏控制器不可用：请把面板底部那行状态发我')
           },
-          style: { cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
         }, '在侧边栏打开'),
     createElement('button', {
       type: 'button',
@@ -1261,12 +1288,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       // The desktop app has NO Reload menu item and no Cmd+R binding (verified by
       // enumerating its menus with System Events), so a page could only be
       // refreshed by closing and reopening it. This is that missing affordance.
-      className: 'zt-btn',
+      style: { ...BTN, cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
       title: '重新加载界面（等价于刷新页面；只重载浏览器半边，不动宿主进程）',
       onClick: () => {
         if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') window.location.reload()
       },
-      style: { cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
     }, '重载界面'))
 
   // Right-edge drawer, mirroring the reference plugin's `panel`.

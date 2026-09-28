@@ -103,6 +103,25 @@ interface ClientContext {
  * Open a fresh conversation in the current workspace and send `text` verbatim.
  * Mirrors dsh-zentao's flow so the "处理" button behaves the way it does there.
  */
+/**
+ * The durable default workspace, or undefined when this build has no such API.
+ *
+ * Kept separate and fully guarded: a host without `initializeDefault` (the
+ * reference plugin's build) must still work through the other fallbacks.
+ */
+async function defaultWorkspaceId(workspaces: WorkspacesFace): Promise<string | undefined> {
+  const api = workspaces as { initializeDefault?: (signal?: unknown) => Promise<unknown> }
+  if (typeof api.initializeDefault !== 'function') return undefined
+  try {
+    const value = await api.initializeDefault()
+    if (typeof value === 'string') return value
+    const id = (value as { workspaceId?: unknown } | undefined)?.workspaceId
+    return typeof id === 'string' ? id : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspaces?: WorkspacesFace }, ctx: ClientContext) {
   return async (text: string): Promise<void> => {
     // Reading them as *properties* is what the reference plugin does, and it is
@@ -116,13 +135,32 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
     if (sessions === undefined || workspaces === undefined) {
       throw new Error('会话服务未就绪（sessions/workspaces 不可见）：请刷新页面重试；或用「复制引用」把这条单据贴进对话')
     }
-    const workspaceSnapshot = workspaces.list.getSnapshot()
-    const current = sessions.list.getSnapshot().current
-    const target = (current === undefined
+    // Resolve the target workspace defensively.
+    //
+    // The reference plugin reads `items[].sessionIds` + `recentWorkspaceId`.
+    // Measured on THIS build: the workspaces client exposes `items` but **no
+    // `recentWorkspaceId`** (its client half: 48 × workspaceId, 0 ×
+    // recentWorkspaceId), so copying that fallback threw 「未找到当前项目」.
+    // The chain now ends at a guaranteed source — the durable default workspace —
+    // and reports what it actually saw when even that fails.
+    const workspaceSnapshot = workspaces.list.getSnapshot() as {
+      items?: Array<{ workspaceId?: string, sessionIds?: string[] }>
+      workspaces?: Array<{ workspaceId?: string, sessionIds?: string[] }>
+    }
+    const list = workspaceSnapshot.items ?? workspaceSnapshot.workspaces ?? []
+    const current = (sessions.list.getSnapshot() as { current?: string }).current
+    const byCurrent = current === undefined
       ? undefined
-      : workspaceSnapshot.items.find((item) => item.sessionIds.includes(current))?.workspaceId)
-      ?? workspaceSnapshot.recentWorkspaceId
-    if (target === undefined) throw new Error('未找到当前项目（workspace），请先打开一个项目')
+      : list.find((item) => (item.sessionIds ?? []).includes(current))?.workspaceId
+    // Third route, for builds that expose only a "recent" hint (the reference
+    // plugin's build); last resort is the durable default workspace.
+    const recent = (workspaceSnapshot as { recentWorkspaceId?: string }).recentWorkspaceId
+    const fallback = await defaultWorkspaceId(workspaces)
+    const target = byCurrent ?? list[0]?.workspaceId ?? recent ?? fallback
+    if (target === undefined) {
+      throw new Error(`未找到可用项目（workspace）：当前会话 ${current ?? '未知'}，可见项目 ${list.length} 个`
+        + `${list.length === 0 ? '' : `（${list.map((item) => item.workspaceId ?? '?').join('/')}）`}，默认项目也取不到`)
+    }
     const sessionId = await workspaces.connectWorkspace(target)
     sessions.open(sessionId)
     const scoped = sessions.scope(sessionId)

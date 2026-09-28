@@ -50,7 +50,7 @@ const flush = async (rounds = 6): Promise<void> => {
 function mount(
   rpc: (endpoint: string, payload?: unknown) => Promise<{ ok: true, value: unknown }>,
   handlePrompt: (text: string) => Promise<void> = async () => undefined,
-  options: { sidebar?: boolean, variant?: 'sidebar' } = {},
+  options: { sidebar?: boolean, variant?: 'sidebar', workspaces?: unknown } = {},
 ) {
   // The panel's host calls now go through fetch(`${ZENTAO_FETCH_PATH}`), so the
   // stub replaces global fetch instead of injecting an rpc service.
@@ -180,7 +180,7 @@ function mount(
     ...ctx,
     inject: (deps: string[], callback: (context: unknown) => unknown) => callback({
       sessions,
-      workspaces,
+      workspaces: options.workspaces ?? workspaces,
       // Opt-in: with the sidebar service present the panel must NOT render its
       // floating entry (the sidebar hosts it), which would break every other test.
       // Real shape of the tabs registry (read as a PROPERTY). No controller on
@@ -512,6 +512,57 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     const status = find(tree, (element) => element.props['data-zentao-sidebar-status'] === '1')
     expect(status).toBeDefined()
     expect(textOf(status).join(' ')).toContain('已注册')
+  })
+
+  it('resolves a workspace defensively (this build has no recentWorkspaceId)', async () => {
+    // Measured: the workspaces client on this build exposes `items` but not
+    // `recentWorkspaceId` — copying the reference plugin's fallback threw
+    // 「未找到当前项目」 for every 处理 click. Each route is exercised here.
+    const seen: Array<string> = []
+    const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return { ok: true, value: { bugs: [{ id: '7', title: 'x', severity: '主要', severityLevel: 3, pri: '3', type: 'y', assignedTo: 'dev', resolution: '', href: '/x' }], total: 1, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+      }
+      if (endpoint === 'bugContext') {
+        return { ok: true, value: { bug: { id: '7', title: 'x', product: 'P', status: '激活', assignedTo: 'dev', url: '/x' }, resolve: { uid: 'u', fields: [], defaults: {}, resolutionOptions: [], optionCounts: { resolvedBuild: 1, bugInchargedBy: 1, assignedTo: 1 } }, histories: [] } }
+      }
+      throw new Error(`unexpected ${endpoint}`)
+    }
+    // Case A: a visible workspace, no matching session → first item wins.
+    const first = mount(rpc, async (text) => { seen.push(text) }, {
+      workspaces: {
+        list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-first' }] }) },
+        connectWorkspace: async (id: string) => `s-${id}`,
+      },
+    })
+    let tree = await first.settle()
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await first.settle()
+    ;(find(tree, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree = await first.settle()
+    ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await first.settle()
+    expect(seen).toHaveLength(1)
+
+    // Case B: no visible workspace at all → the durable default is used.
+    const second = mount(rpc, async (text) => { seen.push(text) }, {
+      workspaces: {
+        list: { getSnapshot: () => ({ items: [] }) },
+        connectWorkspace: async (id: string) => `s-${id}`,
+        initializeDefault: async () => ({ workspaceId: 'w-default' }),
+      },
+    })
+    let tree2 = await second.settle()
+    ;(find(tree2, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree2 = await second.settle()
+    ;(find(tree2, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree2 = await second.settle()
+    ;(find(tree2, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await second.settle()
+    expect(seen).toHaveLength(2)
   })
 
   it('opens a detail card when a row is clicked', async () => {

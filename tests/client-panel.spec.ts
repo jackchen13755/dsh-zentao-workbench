@@ -483,7 +483,7 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(calls.filter((endpoint) => endpoint === 'resolveSubmit')).toHaveLength(2)
   })
 
-  it('reports how far the sidebar registration got, and steps aside once it hosts the panel', async () => {
+  it('reports how far the sidebar registration got, and keeps its own entry', async () => {
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
       if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
         return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
@@ -495,12 +495,12 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     }
     const withSidebar = mount(rpc, undefined, { sidebar: true })
     let tree = await withSidebar.settle()
-    // With the sidebar hosting the panel there is no right-edge tab (exactly how
-    // 源代码管理 behaves) — and the status line records why.
-    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeUndefined()
-    // The status line lives in the panel body; read it through the sidebar variant.
-    const inline = mount(rpc, undefined, { sidebar: true, variant: 'sidebar' })
-    tree = await inline.settle()
+    // The entry stays: hiding it required knowing the sidebar entry is visible,
+    // which has never been confirmable here.
+    expect(find(tree, (element) => element.props['data-zentao-entry'] === '1')).toBeDefined()
+    // Open it to read the status line (the footer only exists while open).
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await withSidebar.settle()
     const status = find(tree, (element) => element.props['data-zentao-sidebar-status'] === '1')
     expect(status).toBeDefined()
     expect(textOf(status).join(' ')).toContain('已注册')

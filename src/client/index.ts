@@ -80,8 +80,14 @@ interface NativeTabType {
 }
 
 interface SidebarController {
-  /** Opens (or focuses) a native sidebar tab of the given type. */
-  openTab?: (target: { type: string }, scope?: unknown) => void
+  /**
+   * The navigation controller. Per the shipped README: "`openResource(address,
+   * options?)` and `openTab(kind, options?)` are the navigation controller" —
+   * the argument is the **kind**, and the guide capsule opens a page with
+   * `openTab(entry.kind, { replaceTab: true })`. Passing `{ type: id }` here
+   * (as I did) is the wrong shape and silently opens nothing.
+   */
+  openTab?: (kind: string, options?: { replaceTab?: boolean, paneId?: string, revealIfOpened?: boolean }) => void
 }
 
 interface ClientContext {
@@ -258,11 +264,9 @@ export function apply(ctx: ClientContext): void {
         return undefined
       }
       openSidebarTab = () => {
-        // The shipped contract opens a tab *for a session* ("calls openTab with
-        // that entry's Session id"), so pass the current one when we have it.
-        const current = (scoped as unknown as { sessions?: { list?: { getSnapshot?: () => { current?: string } } } })
-          .sessions?.list?.getSnapshot?.()?.current
-        right.openTab?.({ type: SIDEBAR_TYPE }, current)
+        // KIND, not id — see SidebarController.openTab. `replaceTab` mirrors what
+        // picking a guide capsule does, so the guide gives way to our page.
+        right.openTab?.(SIDEBAR_KIND, { replaceTab: true })
         sidebarState.opened = true
       }
       // NOT auto-opened: the guide entry above is the entry point (that is how

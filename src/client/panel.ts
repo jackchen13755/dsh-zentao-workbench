@@ -562,10 +562,10 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     },
   }, FAB_TEXT)
 
-  // Once the native sidebar really hosts us (guide entry registered + body in
-  // place), the right-edge tab is a second, redundant entry — same as
-  // dsh-source-control, which has none.
-  if (!inline && deps.hasSidebar?.() === true) return null
+  // NOT auto-hidden any more. Hiding it requires knowing the sidebar entry is
+  // actually visible, and that has not been confirmable — every attempt to hide
+  // it "because registration succeeded" left the user with nothing to click.
+  // The user can hide it themselves with the button in the panel footer.
   if (!open && !inline) return entry
 
   const authenticated = config?.authenticated === true
@@ -991,12 +991,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const stamp = lastUpdated === null ? '尚未刷新' : `最近更新 ${lastUpdated.toLocaleTimeString()}`
   // The footer always states the instance and the last refresh time; transient
   // messages go to the corner toast instead of replacing this line.
+  const sidebarReg = deps.sidebarStatus?.()
   const footer = createElement('div', { style: { padding: '6px 12px', borderTop: `1px solid ${TOKEN.line}`, color: TOKEN.dim, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' } },
     createElement('span', { style: { flex: 1 } }, config?.server ? `实例 ${config.server}` : '未配置实例地址（server）'),
     (() => {
       // Rendered, not merely logged: this single line says how far the native
       // sidebar registration got on THIS host, instead of leaving us to guess.
-      const status = deps.sidebarStatus?.()
+      const status = sidebarReg
       if (status === undefined) return null
       // Registered state first, then the reason: "registered but never opened"
       // and "never registered" are different problems and must not read alike.
@@ -1006,10 +1007,25 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
       const text = status.error === undefined ? base : `${base}；${status.error}`
       return createElement('span', {
         'data-zentao-sidebar-status': '1',
+        title: '这一行说明侧边栏注册走到哪一步；如果侧边栏里看不到「禅道」，把这一行发给开发者',
         style: { fontSize: 11, color: status.registered ? TOKEN.dim : '#b45309' },
       }, text)
     })(),
     createElement('span', { 'data-zentao-stamp': '1' }, stamp),
+    sidebarReg === undefined || !sidebarReg.registered
+      ? null
+      : createElement('button', {
+          type: 'button',
+          'data-zentao-action': 'open-in-sidebar',
+          // Escape hatch that does not depend on finding the guide capsule: the
+          // sidebar's own navigation controller opens our page directly.
+          title: '在右侧边栏里打开禅道工作台（不经过指南胶囊）',
+          onClick: () => {
+            if (deps.openInSidebar?.() === true) setFlash('已在侧边栏打开')
+            else setError('侧边栏控制器不可用：请把面板底部那行状态发我')
+          },
+          style: { cursor: 'pointer', fontSize: 11, padding: '1px 6px' },
+        }, '在侧边栏打开'),
     createElement('button', {
       type: 'button',
       'data-zentao-action': 'reload-ui',

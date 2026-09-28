@@ -117,7 +117,7 @@ describe('browser bundle', () => {
       inject: (deps: string[], callback: (context: unknown) => unknown) => {
         injectedServices.push(deps)
         const sidebarRightTabs = { register: (definition: { id: string, kind: string, title: () => string, guide?: Array<Record<string, unknown>> }) => { tabTypes.push(definition); return () => undefined } }
-        const sidebarRight = { openTab: (tab: unknown) => { openedTab = tab } }
+        const sidebarRight = { openTab: (kind: unknown, options?: unknown) => { openedTab = { kind, options } } }
         return callback({ sidebarRightTabs, sidebarRight })
       },
       effect: (callback: () => unknown) => callback(),
@@ -161,7 +161,9 @@ describe('browser bundle', () => {
     const floating = overlay!.component({}) as { props: Record<string, unknown> }
     expect(typeof floating.props.openInSidebar).toBe('function')
     expect((floating.props.openInSidebar as () => boolean)()).toBe(true)
-    expect(openedTab).toEqual({ type: 'dsh-zentao-workbench:panel' })
+    // KIND + replaceTab — the shipped README: "openTab(kind, options?)" and a
+    // guide capsule opens with `openTab(entry.kind, { replaceTab: true })`.
+    expect(openedTab).toEqual({ kind: 'dsh-zentao-workbench:zentao', options: { replaceTab: true } })
   })
 
   it('falls back to the drawer when the host has no sidebar', () => {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-zentao-workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ZenTao (classic index.php era, e.g. 10.6) workbench for DeepSeek Harness: browser-bridge-first session, my-bug list, and a single-shot bug context that removes the resolve-form guesswork (254 build options / 892 member options / HTTP-200 alerts).",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,8 +38,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.2.0-0"
+    "@deepseek-ai/cordis": "^4.0.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -47,7 +46,7 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.1",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

@@ -149,6 +149,14 @@ export interface BugRow {
   type: string
   title: string
   openedBy: string
+  /**
+   * 创建时间，形如 `2026-08-18 16:27:16`；取不到时是空串。
+   *
+   * 列表 HTML 里**没有**任何时间列（实测 361 KB 的 `m=my&f=bug` 页面里日期样字符串
+   * 0 处，「创建」列只是创建者姓名）——所以它来自同一 URL 的 `&t=json` 变体，
+   * 由 {@link parseBugListDates} 解析后按 id 合并进来。
+   */
+  openedDate: string
   assignedTo: string
   /** '…/index.php?m=bug&f=view&bugID=N' as published by the page. */
   href: string
@@ -216,6 +224,8 @@ export function parseBugList(html: string): BugRow[] {
       type: attr(typeCell, 'title') || decodeEntities(typeCell.replace(/<[^>]*>/g, ' ')).trim(),
       title: decodeEntities(anchor?.[3] ?? cells[titleIndex] ?? '').replace(/\s+/g, ' ').trim(),
       openedBy: decodeEntities((cells[titleIndex + 1] ?? '').replace(/<[^>]*>/g, ' ')).trim(),
+      // 列表 HTML 没有时间列，由 parseBugListDates 从 &t=json 合并（见 myBugs）。
+      openedDate: '',
       assignedTo: attr(assigneeCell, 'title') || decodeEntities(assigneeCell.replace(/<[^>]*>/g, ' ')).trim(),
       href: anchor?.[2] ?? '',
       // No dedicated status column: an open bug leaves 解决 and 方案 empty, so
@@ -239,6 +249,37 @@ export function parseListTotal(html: string): number | null {
   if (!m?.[2]) return null
   const value = Number(m[2])
   return Number.isFinite(value) ? value : null
+}
+
+/**
+ * 每行的创建时间：`m=my&f=bug&t=json` → id → `openedDate`。
+ *
+ * 为什么非要这一个额外请求：列表 HTML 根本没有时间列（实测 361 KB 页面里日期样
+ * 字符串 0 处，`创建` 列是创建者姓名），而 `&t=json` 的响应里每条 bug 都带
+ * `"openedDate":"2026-08-18 16:27:16"`。它同时给出 `pager.recTotal` 作为权威总数。
+ *
+ * 响应是**双层** JSON：`{"status":"success","data":"<被转义的 JSON 字符串>"}`，
+ * 常见于经典版禅道的 `t=json` 渲染模式。任何一层不符合预期都返回空 Map（调用方
+ * 照常给出列表，只是没有时间），绝不因为拿不到时间就让整个列表失败。
+ */
+export function parseBugListDates(body: string): Map<string, string> {
+  const dates = new Map<string, string>()
+  try {
+    const outer = JSON.parse(body) as { data?: unknown }
+    const inner = (typeof outer?.data === 'string' ? JSON.parse(outer.data) : outer?.data) as { bugs?: unknown }
+    if (!Array.isArray(inner?.bugs)) return dates
+    for (const item of inner.bugs) {
+      const id = String((item as { id?: unknown })?.id ?? '').trim()
+      const opened = String((item as { openedDate?: unknown })?.openedDate ?? '').trim()
+      if (id === '' || opened === '') continue
+      // 禅道的空日期是 '0000-00-00 00:00:00'，不是空串 —— 照原样显示会变成假数据。
+      if (/^0{4}-0{2}-0{2}/.test(opened)) continue
+      dates.set(id, opened)
+    }
+  } catch {
+    // 拿不到就当没有：创建时间缺席不影响列表本身。
+  }
+  return dates
 }
 
 // --- project list -----------------------------------------------------------

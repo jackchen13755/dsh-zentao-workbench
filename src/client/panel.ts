@@ -68,6 +68,8 @@ interface BugRow {
   title: string
   assignedTo: string
   resolution: string
+  /** 创建时间 `2026-08-18 16:27:16`；旧宿主或取不到时缺席。 */
+  openedDate?: string
   href: string
 }
 interface TaskRow { id: string, name: string, status: string, assignedTo: string, href: string }
@@ -142,6 +144,18 @@ function priBadge(pri: string): ReactNode {
   const tone = priTone(text)
   const label = /^[Pp]/.test(text) ? text.toUpperCase() : `P${text}`
   return toneBadge(label, tone, { 'data-zentao-pri': text }, `优先级 ${label}（${tone.rank}）`)
+}
+
+/**
+ * 创建时间的紧凑写法：当年只写 `MM-DD HH:mm`（侧栏一列放不下年份），跨年才补年份。
+ * 原始串放在 title 里，需要精确值时鼠标一悬停就有。取不到时间返回空串。
+ */
+function shortDate(value: string | undefined, now: Date): string {
+  const text = String(value ?? '').trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(text)
+  if (m === null) return ''
+  const [, year, month, day, hour, minute] = m
+  return year === String(now.getFullYear()) ? `${month}-${day} ${hour}:${minute}` : `${year}-${month}-${day}`
 }
 
 /**
@@ -553,6 +567,9 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     })
   }, [bugs, search])
 
+  /** One clock reading per render, so every row's short date agrees on "this year". */
+  const now = new Date()
+
   /**
    * Turn the ticket's description HTML into something the panel can render.
    *
@@ -899,9 +916,15 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         onKeyDown: (event: { key?: string }) => { if (event.key === 'Escape') setSearch('') },
       }),
       // The hit count belongs next to what produced it, not in the toolbar below.
+      // 它同时回答两个问题：搜索命中了多少条（这是「搜索出的总数」），以及本页一共
+      // 有多少条可比。服务器权威总数在工具栏那一行，两者不混为一谈。
       search.trim() === ''
         ? null
-        : createElement('span', { style: CHIP, title: '命中 / 本页总数' }, `${visibleBugs.length}/${bugs.length}`),
+        : createElement('span', {
+            'data-zentao-hits': '1',
+            style: CHIP,
+            title: `搜索命中 ${visibleBugs.length} 条（本页共 ${bugs.length} 条${bugsTotal.truncated ? `，服务器共 ${bugsTotal.total} 条` : ''}）`,
+          }, `命中 ${visibleBugs.length} 条`),
       search.trim() === ''
         ? null
         : createElement('button', {
@@ -981,10 +1004,14 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
           createElement('option', { value: '15' }, '15 分钟'),
           createElement('option', { value: '30' }, '30 分钟'),
           createElement('option', { value: '0' }, '不自动')),
-        createElement('span', { style: { fontSize: 11, color: TOKEN.dim } },
+        createElement('span', { 'data-zentao-total': '1', style: { fontSize: 11, color: TOKEN.dim } },
           [
             scope === 'project' && bugsTotal.projectName !== undefined ? `项目【${bugsTotal.projectName}】` : '',
-            bugsTotal.truncated ? `共 ${bugsTotal.total} 条，仅显示前 ${bugs.length}` : '',
+            // 服务器权威总数始终显示（以前只在截断时才出现），搜索时另外说明命中数与它的关系，
+            // 免得把「本页命中 3 条」误读成「全库只有 3 条」。
+            bugs.length === 0 ? '' : `共 ${bugsTotal.total} 条`,
+            search.trim() !== '' && visibleBugs.length !== bugs.length ? `命中 ${visibleBugs.length} 条` : '',
+            bugsTotal.truncated ? `仅显示前 ${bugs.length}` : '',
           ].filter((part) => part !== '').join(' · ')),
         createElement('label', {
           style: { display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, padding: '0 9px', borderRadius: 999, border: `1px solid ${allOn ? TOKEN.accent : TOKEN.line}`, fontSize: 11, color: allOn ? TOKEN.accent : TOKEN.dim, cursor: 'pointer', fontWeight: allOn ? 600 : 400 },
@@ -1270,6 +1297,11 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
         createElement('span', { className: 'zt-id' }, `#${bug.id}`),
         createElement('span', null, bug.type || '未分类'),
         createElement('span', null, bug.assignedTo ? `指派 ${bug.assignedTo}` : '未指派'),
+        // 创建时间：有就显示（`创建 MM-DD HH:mm`，title 里是完整时间戳），没有就整段不渲染——
+        // 旧宿主或 t=json 取不到时不该冒出一个空的「创建 」。
+        shortDate(bug.openedDate, now) === ''
+          ? null
+          : createElement('span', { 'data-zentao-opened': bug.id, title: `创建时间 ${bug.openedDate}` }, `创建 ${shortDate(bug.openedDate, now)}`),
         bug.resolution === '' ? null : createElement('span', { className: 'zt-ok' }, `已解决 · ${bug.resolution}`))))),
         detailOverlay))
     }

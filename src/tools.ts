@@ -38,6 +38,16 @@ function text(value: string): Rendered {
   return [{ type: 'text', text: value }]
 }
 
+/**
+ * 创建时间的紧凑写法：当年只写 `MM-DD HH:mm`（列表一行放不下年份），跨年才补年份；
+ * 拿不到或格式不符返回空串，调用方据此整段不渲染。
+ */
+function shortStamp(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(value ?? '').trim())
+  if (m === null) return ''
+  return m[1] === String(new Date().getFullYear()) ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : `${m[1]}-${m[2]}-${m[3]}`
+}
+
 /** Turn an auth failure into the strategy report a caller can act on. */
 function authFailure(error: unknown): { text: string } | null {
   if (error instanceof ZenTaoAuthError) {
@@ -119,9 +129,12 @@ export function createTools(deps: ToolDeps): unknown[] {
         try {
           const result = await workbench.myBugs(a)
           const where = result.scope === 'project' ? `项目 ${result.projectName ?? ''}（#${result.projectID ?? '?'}）的 Bug` : '我的 Bug'
-          const lines = [`${where}（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}`]
+          // 总数用「取回条数/服务器权威总数」两个数并列：只报前者在分页的那天会变成
+          // 谎话（列表页的 data-rec-total 才是权威值）。行的创建时间与面板列一致。
+          const lines = [`${where}（${result.bugs.length}/${result.total}，经「${result.via}」）${result.cached ? ' · 缓存' : ''}${result.orderBy === '' ? '' : ` · 排序 ${result.orderBy}`}${result.truncated ? ` · 仅显示前 ${result.bugs.length} 条` : ''}`]
           for (const bug of result.bugs) {
-            lines.push(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← 指派 ${bug.assignedTo || '-'}${bug.resolution ? `  ✔${bug.resolution}` : ''}`)
+            const created = shortStamp(bug.openedDate)
+            lines.push(`  ${bug.id}  [${bug.severity || '-'}/${bug.pri || '-'}] ${bug.title}  ← 指派 ${bug.assignedTo || '-'}${created === '' ? '' : `  · 创建 ${created}`}${bug.resolution ? `  ✔${bug.resolution}` : ''}`)
           }
           if (result.bugs.length === 0) lines.push('  （没有匹配的单据）')
           lines.push('下一步：用 zentao_bug_context bugID=<id> 取该单的完整上下文（详情 + 解决表单默认值与必填项）。')

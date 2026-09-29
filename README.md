@@ -39,6 +39,13 @@
 4. **重试只花一次 POST**：失败的提交**保留**上下文缓存，修正后重试不再重抓两页（有单测钉住这条不变量）；只有回读确认成功才失效缓存。
 5. **登录四策略**（顺序即优先级）：① 浏览器插件桥（扩展自动带 Cookie）→ ② Chrome cookie 导出 → ③ 表单账密（M4）→ ④ 手工注入。
    未登录时返回**每条策略各探测到什么 + 下一步做什么**，而不是一句"未登录"。
+6. **列表里能看清"多久了"和"一共有多少"**（2026-09-29 加）：
+   - 每行显示 **创建时间**（`创建 08-18 16:27`，跨年才补年份；完整时间戳在 tooltip 里）。
+     来源要说明白：列表 HTML **整页没有日期**（实测 361 KB 页面里日期样字符串 0 处，「创建」列只是创建者姓名），
+     所以宿主额外并行取一次同一 URL 的 `&t=json` 变体（它的每条 bug 都带 `openedDate`）按 id 合并；
+     取不到就退化成不显示该段，绝不让列表因此失败。
+   - 搜索框旁显示 **命中 N 条**，工具栏始终显示**服务器权威总数**（`共 N 条`，来自 pager 的 `data-rec-total`），
+     两者分开写，避免把"本页命中 3 条"误读成"全库只有 3 条"。
 
 ## 工具
 
@@ -181,6 +188,21 @@ Bug 列表与详情卡仍在渲染、以及缺少 `#root` 容器（这条是 har
 DSH 自带的 node（`~/.dsh/dsh-runtimes/*/dependencies/node`）带签名且开启 library validation，
 **无法 dlopen 第三方原生模块**（vitest 的 rolldown 会报 "Cannot find native binding"）。
 构建与测试请用系统 node：`/usr/local/bin/node node_modules/vitest/vitest.mjs run`。
+
+## 与 DSH 宿主的版本关系（2026-09-29 实测，别踩）
+
+- **peer 范围要写宽带**：`"@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <2"`。DSH 的组合门禁
+  （app-boot 的 `evaluatePluginCompatibility`）拿**运行时版本**去匹配每个 `@deepseek-ai/dsh*` peer，
+  窄范围（如 `<0.2.0-0`）会在宿主升到 0.2.0-rc.1 时把整个插件判为不兼容、整行禁用（GUI 显示「异常」）。
+  实测 `dsh-tools` 的 0.1.7-rc.2 与 0.2.0-rc.1 的 `lib/index.js` 与全部 `.d.ts` **逐字节相同**，
+  即纯声明问题 —— 但声明不能删。
+- **不能删这条 peer 还有第二个原因**：`@deepseek-ai/dsh-tools` 的 `lib/index.js` 在**导入时**就
+  `new ToolRuntime(...)` 并 `provide('tools')`。插件目录里若留着可解析的本地副本，任何一次带
+  cache-busting 的重新 import（例如 dsh-super-injector 的 `dev_reload_package`）都会构造出第二个
+  ToolRuntime，报 `service "tools" has been registered`，整条 fiber 直接死。声明 peer 能让 DSH
+  把该裸导入映射回运行时那一份；本地副本只用于 tsc 类型检查。
+- 因此：**本插件的热重载别用 `dev_reload_package`**（会命中上面那条），宿主重启或改 profile 行 id
+  才是干净的换代码方式。
 
 ## 配置
 

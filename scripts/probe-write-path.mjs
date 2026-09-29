@@ -13,15 +13,22 @@
  * `submitResolve`): form encoding, the real endpoint, `alert()` extraction, and
  * the post-submit status re-read that decides `ok`.
  *
- *   node scripts/probe-write-path.mjs <bugID>        # needs a session (ZENTAO_* env or a jar)
+ *   node scripts/probe-write-path.mjs <bugID>        # 会话走 ZENTAO_* 环境变量或已配置的 cookie jar
  *
  * Exit code 0 means: refused as designed AND the bug did not change.
  */
-const JAR = '/Users/zhe.chen/Desktop/dsh/github/.scratch/zentao/cookies.txt'
-const mod = await import('/Users/zhe.chen/Desktop/dsh/github/dsh-zentao-workbench/dist/index.js')
+import { fileURLToPath } from 'node:url'
+// 实例地址与 jar 一律从环境取（这个仓库会被发布，不能把内网地址和本机路径写死在里面）。
+const SERVER = process.env.ZENTAO_SERVER ?? process.env.ZENTAO_URL ?? ''
+const JAR = process.env.ZENTAO_JAR ?? ''
+const mod = await import(fileURLToPath(new URL('../dist/index.js', import.meta.url)))
 const { ZenTaoSession, ZentaoWorkbench, planResolve, submitResolve } = mod
 
-const session = new ZenTaoSession({ server: 'https://zen.sgrl.io', jarPaths: [JAR] })
+if (SERVER === '') {
+  console.error('probe-write-path: 先设 ZENTAO_SERVER（如 https://<your-zentao-host>），可选 ZENTAO_JAR 指向 cookie jar')
+  process.exit(2)
+}
+const session = new ZenTaoSession({ server: SERVER, ...(JAR === '' ? {} : { jarPaths: [JAR] }) })
 const wb = new ZentaoWorkbench(session)
 const bugID = process.argv[2] ?? '55036'
 

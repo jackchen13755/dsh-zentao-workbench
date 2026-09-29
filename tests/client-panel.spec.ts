@@ -640,3 +640,72 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     expect(payloads[0]).toContain('先用 zentao_bug_context')
   })
 })
+
+/**
+ * 列表里要能一眼看到创建时间与总数 —— 用户明确要的两件事。
+ * 时间来自 listBugs 载荷（宿主从 &t=json 合并进来的 openedDate）。
+ */
+describe('列表的创建时间与总数', () => {
+  const listRpc = (bugs: unknown[], total: number = bugs.length, truncated = false) => async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
+    if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+      return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
+    }
+    if (endpoint === 'listProjects') return { ok: true, value: { projects: [], via: 'bridge', url: '', fetchedAt: '' } }
+    if (endpoint === 'listBugs') return { ok: true, value: { bugs, total, truncated, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+    throw new Error(`unexpected endpoint ${endpoint}`)
+  }
+
+  const openPanel = async (rpc: ReturnType<typeof listRpc>): Promise<string> => {
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+    return textOf(tree).join(' ')
+  }
+
+  it('renders 创建 MM-DD HH:mm per row, with the full stamp in the tooltip', async () => {
+    const now = new Date()
+    const sameYear = `${now.getFullYear()}-08-18 16:27:16`
+    const { settle } = mount(listRpc([
+      { id: '55036', title: '查询条件location浮层问题', severity: '主要', severityLevel: 3, pri: '3', type: '需求逻辑问题', assignedTo: 'dev', resolution: '', href: '/x', openedDate: sameYear },
+      { id: '55035', title: '支付回调超时', severity: '致命', severityLevel: 1, pri: '1', type: '代码错误', assignedTo: 'dev2', resolution: '', href: '/x', openedDate: '2024-03-05 08:09:10' },
+      { id: '55034', title: '没有时间的旧行', severity: '次要', severityLevel: 4, pri: '4', type: '代码错误', assignedTo: 'dev3', resolution: '', href: '/x' },
+    ]))
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    const text = textOf(tree).join(' ')
+    expect(text).toContain('创建 08-18 16:27')       // 当年只写 MM-DD HH:mm
+    expect(text).toContain('创建 2024-03-05')        // 跨年补年份
+    const stamp = find(tree, (element) => element.props['data-zentao-opened'] === '55036')
+    expect(stamp?.props.title).toBe(`创建时间 ${sameYear}`)
+    // 没有时间的行不该冒出一个空的「创建 」
+    expect(find(tree, (element) => element.props['data-zentao-opened'] === '55034')).toBeUndefined()
+    expect(text).not.toContain('创建  ')
+  })
+
+  it('shows the authoritative total even when nothing is truncated', async () => {
+    const text = await openPanel(listRpc([
+      { id: '1', title: 'a', severity: '主要', severityLevel: 3, pri: '3', type: 'x', assignedTo: 'dev', resolution: '', href: '/x' },
+    ], 29))
+    expect(text).toContain('共 29 条')
+    expect(text).not.toContain('仅显示前')
+  })
+
+  it('states the search hit total, and keeps the server total distinct', async () => {
+    const { settle } = mount(listRpc([
+      { id: '55036', title: '查询条件location浮层问题', severity: '主要', severityLevel: 3, pri: '3', type: '需求逻辑问题', assignedTo: 'dev', resolution: '', href: '/x' },
+      { id: '55035', title: '支付回调超时', severity: '致命', severityLevel: 1, pri: '1', type: '代码错误', assignedTo: 'dev2', resolution: '', href: '/x' },
+    ], 29))
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    ;(find(tree, (element) => element.props['data-zentao-search'] === '1')!.props.onChange as (event: unknown) => void)({ target: { value: '55035' } })
+    tree = await settle()
+    const text = textOf(tree).join(' ')
+    expect(text).toContain('命中 1 条')   // 搜索出的总数
+    expect(text).toContain('共 29 条')    // 服务器权威总数仍在，两者不混为一谈
+  })
+})

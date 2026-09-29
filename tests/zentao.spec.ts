@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUG_ORDER_FIELDS, normalizeOrderBy, ZentaoWorkbench } from '../src/zentao.js'
-import { bugListPage, bugRow } from './fixtures/pages.js'
+import { bugListJson, bugListPage, bugRow } from './fixtures/pages.js'
 import { fakeSession } from './helpers/fake-session.js'
 
 /**
@@ -65,7 +65,9 @@ describe('myBugs scope', () => {
     const workbench = new ZentaoWorkbench(session)
     await workbench.myBugs({ scope: 'project', projectID: '187' })
     await workbench.myBugs({})
-    expect(paths).toHaveLength(2)
+    // 只数 HTML 列表请求：每次列表加载都会并行拉一份 `&t=json` 补创建时间，
+    // 那条陪伴请求不该让「换了个范围就要重新取」的判断失真。
+    expect(paths.filter((path) => !path.endsWith('&t=json'))).toHaveLength(2)
   })
 })
 
@@ -106,9 +108,37 @@ describe('myBugs ordering', () => {
     const workbench = new ZentaoWorkbench(session)
     await workbench.myBugs({ orderBy: 'id_desc' })
     await workbench.myBugs({ orderBy: 'severity_asc' })
-    expect(paths).toHaveLength(2)
+    const lists = (): string[] => paths.filter((path) => !path.endsWith('&t=json'))
+    expect(lists()).toHaveLength(2)
     // …and the same order is still cached.
     await workbench.myBugs({ orderBy: 'severity_asc' })
-    expect(paths).toHaveLength(2)
+    expect(lists()).toHaveLength(2)
+  })
+})
+
+/**
+ * 列表的创建时间来自同一 URL 的 `&t=json` 变体：HTML 整页没有日期（实测 0 处），
+ * 而 JSON 的 `type` 字段是空的 —— 所以两边都要，缺一边就丢信息。
+ */
+describe('myBugs 创建时间', () => {
+  it('merges openedDate from the t=json variant into the HTML-parsed rows', async () => {
+    const session = fakeSession((path) => path.endsWith('&t=json')
+      ? bugListJson([{ id: '1', openedDate: '2026-08-18 16:27:16' }, { id: '2', openedDate: '2026-09-01 09:00:00' }])
+      : bugListPage([bugRow({ id: '1', title: 'a' }), bugRow({ id: '2', title: 'b' })]))
+    const result = await new ZentaoWorkbench(session).myBugs({ refresh: true })
+    expect(result.bugs.map((bug) => bug.openedDate)).toEqual(['2026-08-18 16:27:16', '2026-09-01 09:00:00'])
+    expect(session.gets.some((path) => path.endsWith('&t=json'))).toBe(true)
+    // 类型仍来自 HTML（JSON 里是空的），证明没有把行换成 JSON 解析。
+    expect(result.bugs[0]?.type).toBeTruthy()
+  })
+
+  it('keeps the list working when the JSON variant is unavailable', async () => {
+    const session = fakeSession((path) => {
+      if (path.endsWith('&t=json')) throw new Error('t=json 不被这台实例支持')
+      return bugListPage([bugRow({ id: '1', title: 'a' })])
+    })
+    const result = await new ZentaoWorkbench(session).myBugs({ refresh: true })
+    expect(result.bugs).toHaveLength(1)
+    expect(result.bugs[0]?.openedDate).toBe('')
   })
 })

@@ -162,3 +162,27 @@ export function taskRow(options: { id: string, name: string, status?: string, as
   <td><span title="${options.assignedTo ?? 'dev.one'}">${options.assignedTo ?? 'Dev One'}</span></td>
 </tr>`
 }
+
+/**
+ * `m=my&f=bug&t=json` — the only page that carries per-row timestamps.
+ *
+ * Measured shape (10.6): **double-encoded** — `{"status":"success","data":"<escaped JSON>"}`,
+ * whose inner object holds `bugs[]` with `openedDate` plus `pager.recTotal`.
+ * The outer `recTotal` is 0 on the real instance, which is why the pager's own
+ * value (or the HTML page's `data-rec-total`) is the one to trust.
+ */
+export function bugListJson(bugs: Array<{ id: string, openedDate?: string, title?: string }>): string {
+  const inner = {
+    title: '我的地盘::我的Bug',
+    bugs: bugs.map((bug) => ({
+      id: bug.id,
+      title: bug.title ?? `bug ${bug.id}`,
+      openedBy: 'Yanping.Wang',
+      openedDate: bug.openedDate ?? '2026-08-18 16:27:16',
+      assignedTo: 'dev.one',
+    })),
+    recTotal: 0,
+    pager: { recTotal: bugs.length, recPerPage: '1000', pageID: 1 },
+  }
+  return JSON.stringify({ status: 'success', data: JSON.stringify(inner), md5: 'x' })
+}

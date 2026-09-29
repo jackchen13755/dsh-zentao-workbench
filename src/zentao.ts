@@ -13,7 +13,7 @@
  */
 
 import { FIELD_LABELS, RESOLVE_FIELD_RULES } from './fields.js'
-import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugView, parseHistories, parseListTotal, parseProjectList, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type ProjectRow, type SelectOption, type TaskRow } from './parse.js'
+import { lastResolvedBuild, matchBuildOptions, parseBugList, parseBugListDates, parseBugView, parseHistories, parseListTotal, parseProjectList, parseResolveForm, parseTaskList, taskListEmpty, type BugRow, type ProjectRow, type SelectOption, type TaskRow } from './parse.js'
 import { planResolve, submitResolve, type ResolveArgs, type ResolvePlan, type SubmitOutcome } from './resolve.js'
 import type { StrategyId, ZenTaoSession } from './session.js'
 
@@ -177,11 +177,23 @@ export class ZentaoWorkbench {
       const base = scope === 'project'
         ? `/index.php?m=project&f=bug&projectID=${encodeURIComponent(projectID)}`
         : '/index.php?m=my&f=bug&type=assignedTo'
-      const page = await this.session.get(`${base}${orderBy === '' ? '' : `&orderBy=${orderBy}`}`)
+      const listUrl = `${base}${orderBy === '' ? '' : `&orderBy=${orderBy}`}`
+      // 两个请求并行：HTML 提供列（类型/级别/指派…），`&t=json` 只补时间。
+      // 为什么不能只留 JSON：它的 `type` 字段实测是空的（"需求逻辑问题" 只出现在
+      // HTML 的类型列里）；为什么不能只留 HTML：它整页没有日期（实测 0 处）。
+      // JSON 拿不到就退化成「没有创建时间」，绝不让列表因此失败。
+      const [page, jsonPage] = await Promise.all([
+        this.session.get(listUrl),
+        this.session.get(`${listUrl}&t=json`).catch(() => null),
+      ])
       const projectName = scope === 'project'
         ? (/<title>\s*(?:【([^】]{1,40})】|[^<]{0,60}?)::/.exec(page.body)?.[1] ?? '').trim()
         : ''
-      const bugs = parseBugList(page.body)
+      const dates = jsonPage === null ? new Map<string, string>() : parseBugListDates(jsonPage.body)
+      const bugs = parseBugList(page.body).map((bug) => {
+        const openedDate = dates.get(bug.id)
+        return openedDate === undefined ? bug : { ...bug, openedDate }
+      })
       const pagerTotal = parseListTotal(page.body)
       this.list = {
         at: Date.now(),

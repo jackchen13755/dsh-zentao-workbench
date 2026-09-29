@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   matchBuildOptions,
   parseBugList,
+  parseBugListDates,
   parseBugView,
   parseHistories,
   parseListTotal,
@@ -14,7 +15,7 @@ import {
   sessionExpired,
   taskListEmpty,
 } from '../src/parse.js'
-import { bugListPage, bugRow, bugViewPage, loginFormPage, loginRedirectPage, resolveFormPage, taskListPage, taskRow } from './fixtures/pages.js'
+import { bugListJson, bugListPage, bugRow, bugViewPage, loginFormPage, loginRedirectPage, resolveFormPage, taskListPage, taskRow } from './fixtures/pages.js'
 
 describe('session fingerprints', () => {
   it('treats the redirect script and the login form as expiry', () => {
@@ -227,5 +228,38 @@ describe('matchBuildOptions', () => {
   it('returns nothing for an empty query and honours the limit', () => {
     expect(matchBuildOptions(options, '  ')).toEqual([])
     expect(matchBuildOptions(options, 'xx', 1)).toHaveLength(1)
+  })
+})
+
+/**
+ * 创建时间只存在于 `&t=json` 变体（列表 HTML 实测整页没有任何日期串），
+ * 而它是双层编码的 JSON —— 这两点都栽过跟头，所以在这里钉住。
+ */
+describe('parseBugListDates', () => {
+  it('reads openedDate out of the double-encoded payload', () => {
+    const dates = parseBugListDates(bugListJson([
+      { id: '55036', openedDate: '2026-08-18 16:27:16' },
+      { id: '55035', openedDate: '2026-09-01 09:00:00' },
+    ]))
+    expect(dates.get('55036')).toBe('2026-08-18 16:27:16')
+    expect(dates.get('55035')).toBe('2026-09-01 09:00:00')
+    expect(dates.size).toBe(2)
+  })
+
+  it('drops ZenTao\'s zero date instead of showing 0000-00-00 as real data', () => {
+    const dates = parseBugListDates(bugListJson([{ id: '1', openedDate: '0000-00-00 00:00:00' }]))
+    expect(dates.has('1')).toBe(false)
+  })
+
+  it('degrades to an empty map on anything unexpected (list must still render)', () => {
+    for (const body of [
+      '<html>登录页</html>',
+      '{"status":"fail"}',
+      '{"status":"success","data":"not json"}',
+      '{"status":"success","data":"{\\"bugs\\":\\"nope\\"}"}',
+      '',
+    ]) {
+      expect(parseBugListDates(body).size).toBe(0)
+    }
   })
 })

@@ -44,9 +44,34 @@ interface SlotsService {
   ): () => void
 }
 
-interface SessionListLike { getSnapshot(): { current?: string } }
+/**
+ * The sessions list projection this build actually publishes (measured in the
+ * shipped client half of `@deepseek-ai/dsh-api-session-controller`):
+ * `{ ids, byId, phase, projectionsBySession }`.
+ *
+ * `current` is NOT part of it. The Web client has no "selected session" field:
+ * the session drawn by the main view is the one retained with the `mainView`
+ * source, and every shipped consumer asks for it exactly that way —
+ * `Object.values(list.byId).find((row) => (row.retainedBy.mainView ?? 0) > 0)`
+ * (`dsh-client-ui-workspace` itself). `SessionSummary` rows also carry `cwd`,
+ * so a session can be tied to a Workspace by path as well as by membership.
+ */
+interface SessionRowLike {
+  id?: string
+  cwd?: string
+  blank?: boolean
+  retainedBy?: Record<string, number>
+}
+interface SessionListLike {
+  getSnapshot(): {
+    /** Legacy/other-build shape, kept typed so the probe stays honest. */
+    current?: string
+    ids?: string[]
+    byId?: Record<string, SessionRowLike>
+  }
+}
 interface WorkspaceSnapshot {
-  items: Array<{ workspaceId: string, sessionIds: string[] }>
+  items: Array<{ workspaceId: string, path?: string, sessionIds: string[] }>
   recentWorkspaceId?: string
 }
 interface WorkspaceListLike { getSnapshot(): WorkspaceSnapshot }
@@ -216,6 +241,53 @@ function scopeFor(sessions: SessionsFace, sessionId: string): ScopedLike | undef
   return undefined
 }
 
+/**
+ * Whether two host paths name the same directory.
+ *
+ * Both sides come from the same host (a Workspace's `path`, a Session's `cwd`),
+ * so this only absorbs the spelling differences that survive that trip: a
+ * trailing separator or a doubled one. Case is left alone — the host's absolute
+ * paths are the authority here.
+ */
+function samePath(left?: string, right?: string): boolean {
+  if (typeof left !== 'string' || typeof right !== 'string') return false
+  const strip = (value: string): string => value.replace(/\/+$/, '')
+  const a = strip(left)
+  const b = strip(right)
+  return a !== '' && b !== '' && a === b
+}
+
+/**
+ * The session the main view is currently drawing, or undefined when none is.
+ *
+ * `sessions.list.getSnapshot().current` is the reference plugin's shape and does
+ * not exist on this build (its session list projection is
+ * `{ ids, byId, phase, projectionsBySession }` — measured in the shipped client
+ * half). Reading only that field returned undefined for every click, so the old
+ * resolution chain fell through to `items[0]` and opened dsh-github no matter
+ * which project the user was in (user report, 2026-10-08).
+ *
+ * The official stand-in is the `mainView` retention source: the workspace
+ * sidebar itself reads the current session as
+ * `Object.values(list.byId).find((row) => (row.retainedBy.mainView ?? 0) > 0)`.
+ * `current` stays in the chain for other builds. When neither is present this
+ * returns undefined on purpose: guessing here is what put every click in the
+ * wrong project.
+ */
+function resolveCurrentSessionId(snapshot: {
+  current?: string
+  ids?: string[]
+  byId?: Record<string, { id?: string, retainedBy?: Record<string, number> }>
+}): string | undefined {
+  if (typeof snapshot.current === 'string' && snapshot.current !== '') return snapshot.current
+  const byId = snapshot.byId ?? {}
+  const rows = (snapshot.ids ?? Object.keys(byId)).map((id) => byId[id]).filter((row) => row !== undefined)
+  const idOf = (row: { id?: string }): string | undefined =>
+    typeof row.id === 'string' && row.id !== '' ? row.id : undefined
+  const held = rows.find((row) => (row.retainedBy?.mainView ?? 0) > 0)
+  return held === undefined ? undefined : idOf(held)
+}
+
 /** The `conversation` service behind a scope/binding, when it is reachable. */
 function conversationOf(scope: unknown): { send(text: string): Promise<unknown> } | undefined {
   const get = (scope as { get?: unknown } | undefined)?.get
@@ -249,26 +321,59 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
     // Measured on THIS build: the workspaces client exposes `items` but **no
     // `recentWorkspaceId`** (its client half: 48 × workspaceId, 0 ×
     // recentWorkspaceId), so copying that fallback threw 「未找到当前项目」.
-    // The chain now ends at a guaranteed source — the durable default workspace —
-    // and reports what it actually saw when even that fails.
+    //
+    // 2026-10-08 (user report: every 处理 click landed in dsh-github): the
+    // current session was being read from `sessions.list.getSnapshot().current`,
+    // a field this build's session list does not have, so `byCurrent` was always
+    // undefined and the chain fell through to `items[0]` — dsh-github — which is
+    // exactly where the wrong project came from. See {@link resolveCurrentSessionId}.
+    // The chain is now: the current session's own project → the host's recent
+    // hint → the durable default; an unknown target is reported, never guessed.
     const workspaceSnapshot = workspaces.list.getSnapshot() as {
-      items?: Array<{ workspaceId?: string, sessionIds?: string[] }>
-      workspaces?: Array<{ workspaceId?: string, sessionIds?: string[] }>
+      items?: Array<{ workspaceId?: string, path?: string, sessionIds?: string[] }>
+      workspaces?: Array<{ workspaceId?: string, path?: string, sessionIds?: string[] }>
+      recentWorkspaceId?: string
     }
-    const list = workspaceSnapshot.items ?? workspaceSnapshot.workspaces ?? []
-    const current = (sessions.list.getSnapshot() as { current?: string }).current
+    const list = (workspaceSnapshot.items ?? workspaceSnapshot.workspaces ?? []).filter(
+      (item): item is { workspaceId: string, path?: string, sessionIds?: string[] } => typeof item.workspaceId === 'string' && item.workspaceId !== '',
+    )
+    const sessionSnapshot = sessions.list.getSnapshot() as {
+      current?: string
+      ids?: string[]
+      byId?: Record<string, SessionRowLike>
+    }
+    const current = resolveCurrentSessionId(sessionSnapshot)
+    // Membership first (authoritative on this build: `WorkspaceView.sessionIds`
+    // is exactly what the sidebar uses to group sessions), path second (a just
+    // created or not-yet-summarised session can be missing from membership while
+    // its `cwd` already names the project).
+    const currentRow = current === undefined ? undefined : sessionSnapshot.byId?.[current]
     const byCurrent = current === undefined
       ? undefined
       : list.find((item) => (item.sessionIds ?? []).includes(current))?.workspaceId
+        ?? list.find((item) => samePath(item.path, currentRow?.cwd))?.workspaceId
     // Third route, for builds that expose only a "recent" hint (the reference
     // plugin's build); last resort is the durable default workspace.
-    const recent = (workspaceSnapshot as { recentWorkspaceId?: string }).recentWorkspaceId
+    const recentHint = (workspaceSnapshot as { recentWorkspaceId?: string }).recentWorkspaceId
+    const recent = recentHint !== undefined && list.some((item) => item.workspaceId === recentHint) ? recentHint : undefined
     const fallback = await defaultWorkspaceId(workspaces)
-    const target = byCurrent ?? list[0]?.workspaceId ?? recent ?? fallback
+    // `list[0]` is deliberately NOT a route: on this machine it is always
+    // dsh-github, so falling back to it silently opened every 处理 click in the
+    // wrong project (user report). An unknown target is reported, never guessed.
+    const target = byCurrent ?? recent ?? fallback
     if (target === undefined) {
       throw new Error(`未找到可用项目（workspace）：当前会话 ${current ?? '未知'}，可见项目 ${list.length} 个`
-        + `${list.length === 0 ? '' : `（${list.map((item) => item.workspaceId ?? '?').join('/')}）`}，默认项目也取不到`)
+        + `${list.length === 0 ? '' : `（${list.map((item) => `${item.workspaceId}${item.path === undefined ? '' : `@${item.path}`}`).join('/')}）`}`
+        + '，默认项目也取不到')
     }
+    // When the current session did not name the project, say which one was used
+    // — inside the message, because that is the only channel the panel's flash
+    // line shares with this closure. A silent fallback is what made the wrong
+    // project look like a bug in the item rather than a missing fact.
+    const targetTitle = list.find((item) => item.workspaceId === target)?.path ?? target
+    const promptText = byCurrent === undefined
+      ? `${text}\n\n（本次在「${targetTitle}」项目新建了会话：禅道面板没取到你当前会话的归属项目${current === undefined ? '' : `（当前会话 ${current}）`}）`
+      : text
     // Open a session for that workspace by capability, not by assumption.
     //
     // Measured: the reference plugin calls `workspaces.connectWorkspace`, but this
@@ -299,7 +404,7 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
       await runUsing.call(sessions, sessionId, {}, async (binding?: unknown) => {
         const conversation = conversationOf(binding) ?? conversationOf(scopeFor(sessions, sessionId))
         if (conversation === undefined) return
-        await conversation.send(text)
+        await conversation.send(promptText)
         sent = true
       })
       if (!sent) {
@@ -309,7 +414,7 @@ function buildHandlePrompt(getServices: () => { sessions?: SessionsFace, workspa
     }
     const conversation = conversationOf(scoped)
     if (conversation === undefined) throw new Error('conversation 服务不可用，请确认 Web 对话插件已加载')
-    await conversation.send(text)
+    await conversation.send(promptText)
   }
 }
 

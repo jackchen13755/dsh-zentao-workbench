@@ -774,7 +774,8 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const panelStyle = createElement('style', { 'data-zentao-style': '1', dangerouslySetInnerHTML: { __html: PANEL_CSS } }, null)
 
   const body: ReactNode[] = []
-  if (error !== '') body.push(createElement('div', { key: 'err', style: { padding: '8px 12px', color: TOKEN.danger, fontSize: 12 } }, error))
+  // Tagged so its presence is testable without depending on the error text.
+  if (error !== '') body.push(createElement('div', { key: 'err', 'data-zentao-error': '1', style: { padding: '8px 12px', color: TOKEN.danger, fontSize: 12 } }, error))
 
   if (!authenticated) {
     if ((config?.server ?? '') === '') {

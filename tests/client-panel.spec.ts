@@ -234,6 +234,24 @@ function mount(
 }
 
 describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
+  /**
+   * The smallest RPC surface the 处理 buttons need: status, one row, and its
+   * detail context. Shared by the workspace-resolution tests below so each one
+   * only has to describe the services it is actually about.
+   */
+  const rpcForBug = async (endpoint: string, _payload?: unknown): Promise<{ ok: true, value: unknown }> => {
+    if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+      return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [] } } }
+    }
+    if (endpoint === 'listBugs') {
+      return { ok: true, value: { bugs: [{ id: '7', title: '浮层问题', severity: '主要', severityLevel: 3, pri: '3', type: '需求逻辑问题', assignedTo: 'dev', resolution: '', href: '/index.php?m=bug&f=view&bugID=7' }], total: 1, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
+    }
+    if (endpoint === 'bugContext') {
+      return { ok: true, value: { bug: { id: '7', title: '浮层问题', product: 'P', status: '激活', assignedTo: 'dev', url: '/index.php?m=bug&f=view&bugID=7' }, resolve: { uid: 'u', fields: [], defaults: {}, resolutionOptions: [], optionCounts: { resolvedBuild: 1, bugInchargedBy: 1, assignedTo: 1 } }, histories: [] } }
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`)
+  }
+
   it('loads, then a refresh hits status + list, and the list renders', async () => {
     const calls: string[] = []
     const rpc = async (endpoint: string): Promise<{ ok: true, value: unknown }> => {
@@ -531,7 +549,10 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
       }
       throw new Error(`unexpected ${endpoint}`)
     }
-    // Case A: a visible workspace, no matching session → first item wins.
+    // Case A: workspaces exist but nothing names the current session, and the
+    // host offers no recent/default hint → REPORT, do not guess. `items[0]` used
+    // to win here, which is exactly how every 处理 click ended up in dsh-github
+    // (user report, 2026-10-08).
     const first = mount(rpc, async (text) => { seen.push(text) }, {
       workspaces: {
         list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-first' }] }) },
@@ -544,17 +565,19 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(find(tree, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
     tree = await first.settle()
     ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
-    await first.settle()
-    expect(seen.length).toBeGreaterThanOrEqual(1)
+    tree = await first.settle()
+    expect(seen.length).toBe(0)
+    expect(find(tree, (element) => element.props['data-zentao-error'] === '1')).toBeDefined()
 
     // Case A2: this build has `sessions.create` and NO connectWorkspace — the
     // route that actually runs here (user report: "connectWorkspace is not a
-    // function").
+    // function"). The session row carries the legacy `current` field, which stays
+    // supported for other builds.
     const created: Array<string> = []
     const third = mount(rpc, async (text) => { seen.push(text) }, {
-      workspaces: { list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-a2' }] }) } },
+      workspaces: { list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-a2', sessionIds: ['s1'] }] }) } },
       sessions: {
-        list: { getSnapshot: () => ({ current: 's1' }) },
+        list: { getSnapshot: () => ({ current: 's1', ids: ['s1'], byId: { s1: { id: 's1', retainedBy: { mainView: 1 } } } }) },
         open: () => undefined,
         scope: () => ({ get: () => ({ send: async (text: string) => { seen.push(text) } }) }),
         create: async (payload: unknown) => { created.push((payload as { workspaceId: string }).workspaceId); return { sessionId: 's-new' } },
@@ -568,7 +591,7 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(find(tree3, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
     await third.settle()
     expect(created).toEqual(['w-a2'])
-    expect(seen.length).toBeGreaterThanOrEqual(2)
+    expect(seen.length).toBeGreaterThanOrEqual(1)
 
     // Case B: no visible workspace at all → the durable default is used.
     const second = mount(rpc, async (text) => { seen.push(text) }, {
@@ -586,6 +609,124 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(find(tree2, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
     await second.settle()
     expect(seen.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('opens in the workspace of the session the main view holds (not items[0])', async () => {
+    // Regression, 2026-10-08 (user: 「进的工作区不对，都直接进 dsh-github 了」).
+    // The services below carry the shape THIS build actually publishes:
+    // `sessions.list` is `{ ids, byId, phase, projectionsBySession }` — there is
+    // no `current`, so reading it always returned undefined and the resolution
+    // chain fell through to `items[0]`. The session drawn by the main view is the
+    // one retained with the `mainView` source (that is how the workspace sidebar
+    // reads it too), and dsh-github deliberately comes FIRST in this list: the
+    // test fails if the plugin ever guesses `items[0]` again.
+    const created: string[] = []
+    const sent: string[] = []
+    const sessions = {
+      list: {
+        getSnapshot: () => ({
+          ids: ['session-zentao-workbench'],
+          byId: {
+            'session-zentao-workbench': {
+              id: 'session-zentao-workbench',
+              cwd: '/path/to/proj-zentao',
+              blank: false,
+              retainedBy: { mainView: 1 },
+            },
+          },
+        }),
+      },
+      open: () => undefined,
+      scope: () => ({ get: () => ({ send: async (text: string) => { sent.push(text) } }) }),
+      create: async (payload: unknown) => {
+        created.push((payload as { workspaceId: string }).workspaceId)
+        return 'session-new'
+      },
+    }
+    const workspaces = {
+      list: {
+        getSnapshot: () => ({
+          items: [
+            { workspaceId: 'w-github', path: '/path/to/proj-github', sessionIds: [] },
+            { workspaceId: 'w-zentao', path: '/path/to/proj-zentao', sessionIds: ['session-zentao-workbench'] },
+          ],
+        }),
+      },
+    }
+    const harness = mount(rpcForBug, async (text) => { sent.push(text) }, { sessions, workspaces })
+    let tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await harness.settle()
+    expect(created).toEqual(['w-zentao'])
+    // Resolved from the session's own project → no "opened elsewhere" note.
+    expect(sent.some((text) => text.includes('本次在'))).toBe(false)
+  })
+
+  it('falls back to the session cwd when the workspace has not claimed it yet', async () => {
+    // A session created a moment ago can be missing from `WorkspaceView.sessionIds`
+    // while its header already records the project directory. Then the project is
+    // still known exactly — it must not degrade to a guessed one.
+    const created: string[] = []
+    const sessions = {
+      list: {
+        getSnapshot: () => ({
+          ids: ['s-fresh'],
+          byId: { 's-fresh': { id: 's-fresh', cwd: '/path/to/proj-beta', retainedBy: { mainView: 1 } } },
+        }),
+      },
+      scope: () => ({ get: () => ({ send: async () => undefined }) }),
+      create: async (payload: unknown) => { created.push((payload as { workspaceId: string }).workspaceId); return 's-new' },
+    }
+    const workspaces = {
+      list: {
+        getSnapshot: () => ({
+          items: [
+            { workspaceId: 'w-github', path: '/path/to/proj-github', sessionIds: [] },
+            { workspaceId: 'w-beta', path: '/path/to/proj-beta/', sessionIds: [] },
+          ],
+        }),
+      },
+    }
+    const harness = mount(rpcForBug, async () => undefined, { sessions, workspaces })
+    let tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await harness.settle()
+    expect(created).toEqual(['w-beta'])
+  })
+
+  it('says which project it used when the current session names none', async () => {
+    // No current session at all: the fallback is the durable default, and the new
+    // conversation says so — a silent fallback is what made the wrong project
+    // look like the item's fault.
+    const created: string[] = []
+    const sent: string[] = []
+    const sessions = {
+      list: { getSnapshot: () => ({ ids: [], byId: {} }) },
+      scope: () => ({ get: () => ({ send: async (text: string) => { sent.push(text) } }) }),
+      create: async (payload: unknown) => { created.push((payload as { workspaceId: string }).workspaceId); return 's-new' },
+    }
+    const workspaces = {
+      list: { getSnapshot: () => ({ items: [{ workspaceId: 'w-github', path: '/path/to/proj-github', sessionIds: [] }] }) },
+      initializeDefault: async () => ({ workspaceId: 'w-github' }),
+    }
+    const harness = mount(rpcForBug, async (text) => { sent.push(text) }, { sessions, workspaces })
+    let tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-bug'] === '7')!.props.onClick as () => void)()
+    tree = await harness.settle()
+    ;(find(tree, (element) => element.props['data-zentao-action'] === 'one-click-fix')!.props.onClick as () => void)()
+    await harness.settle()
+    expect(created).toEqual(['w-github'])
+    expect(sent.some((text) => text.includes('/path/to/proj-github'))).toBe(true)
   })
 
   it('opens a detail card when a row is clicked', async () => {

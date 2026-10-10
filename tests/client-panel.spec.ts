@@ -304,6 +304,56 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     await settle()
     expect(calls.filter((endpoint) => endpoint === 'sessionStatus').length).toBeGreaterThanOrEqual(1)
     expect(calls).toContain('listBugs')
+    // Exactly one list fetch per click: `refreshAll(true)` already re-reads the
+    // list, so letting the sort effect fire as well doubled the page fetches
+    // (and each one is a full ZenTao round trip).
+    expect(calls.filter((endpoint) => endpoint === 'listBugs').length).toBe(1)
+  })
+
+  it('opens cache-first: the first paint must not force a full re-read', async () => {
+    type Sent = { endpoint: string, payload: Record<string, unknown> }
+    const sent: Sent[] = []
+    const rpc = async (endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown }> => {
+      sent.push({ endpoint, payload: (payload ?? {}) as Record<string, unknown> })
+      if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
+        return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [] } } }
+      }
+      if (endpoint === 'listBugs') {
+        return {
+          ok: true,
+          value: {
+            bugs: [{ id: '55036', title: '浮层问题', severity: '主要', pri: '3', type: 'x', assignedTo: 'dev.one', resolution: '', href: '/x' }],
+            total: 1,
+            via: 'bridge',
+            url: '',
+            fetchedAt: '',
+            cached: false,
+          },
+        }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }
+
+    const { settle } = mount(rpc)
+    let tree = await settle()
+    ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
+    tree = await settle()
+
+    // Opening the panel used to send `refresh:true` for status and the list,
+    // which cost one probe plus two list page fetches through the single-flight
+    // relay on every open. The first paint must let the host answer from its
+    // caches instead; the forced path stays on the manual refresh button.
+    const firstStatus = sent.find((entry) => entry.endpoint === 'sessionStatus')
+    expect(firstStatus?.payload.refresh).toBe(false)
+    const firstList = sent.find((entry) => entry.endpoint === 'listBugs')
+    expect(firstList?.payload.refresh).toBeUndefined()
+
+    // ...and it still paints the data (the list lands on a later flush).
+    for (let round = 0; round < 20 && !textOf(tree).join(' ').includes('55036'); round++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      tree = await settle()
+    }
+    expect(textOf(tree).join(' ')).toContain('55036')
   })
 
   it('switches to the task tab and renders the instance\'s honest empty state', async () => {
@@ -339,12 +389,14 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
 
   it('re-queries with the chosen order when the sort control changes', async () => {
     const orders: unknown[] = []
+    const sent: Array<{ orderBy?: unknown, refresh?: unknown }> = []
     const rpc = async (endpoint: string, payload?: unknown): Promise<{ ok: true, value: unknown }> => {
       if (endpoint === 'sessionStatus' || endpoint === 'getConfig') {
         return { ok: true, value: { server: 'https://zt.example.com', authenticated: true, strategy: 'bridge', probes: [], config: { server: 'https://zt.example.com', authenticated: true, probes: [] } } }
       }
       if (endpoint === 'listBugs') {
         orders.push((payload as { orderBy?: unknown }).orderBy)
+        sent.push(payload as { orderBy?: unknown, refresh?: unknown })
         return { ok: true, value: { bugs: [{ id: '55036', title: '浮层问题', severity: '主要', pri: '3', type: 'x', assignedTo: 'dev.one', resolution: '', href: '/x' }], total: 1, truncated: false, via: 'bridge', url: '', fetchedAt: '', cached: false } }
       }
       throw new Error(`unexpected endpoint ${endpoint}`)
@@ -354,6 +406,9 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(find(tree, (element) => element.type === 'button' && element.props['data-zentao-entry'] === '1')!.props.onClick as () => void)()
     tree = await settle()
     expect(orders[0]).toBe('id_desc')
+    // The initial load is cache-first (no `refresh`) and happens exactly once.
+    expect(sent.filter((entry) => entry.orderBy === 'id_desc').length).toBe(1)
+    expect(sent[0].refresh).toBeUndefined()
 
     const sort = find(tree, (element) => element.props['data-zentao-sort'] === '1')!
     expect(sort).toBeDefined()
@@ -361,10 +416,15 @@ describe('panel behaviour (compiled bundle, minimal hooks runtime)', () => {
     ;(sort.props.onChange as (event: unknown) => void)({ target: { value: 'severity' } })
     tree = await settle()
     expect(orders).toContain('severity_desc')
+    // Changing the sort must be a **forced** read: the host answers a
+    // refresh-less `listBugs` from its 60s cache, so without `refresh: true`
+    // the panel kept showing the previous result set after the sort changed.
+    expect(sent.find((entry) => entry.orderBy === 'severity_desc')!.refresh).toBe(true)
     const dir = find(tree, (element) => element.props['data-zentao-action'] === 'sort-dir')!
     ;(dir.props.onClick as () => void)()
     await settle()
     expect(orders).toContain('severity_asc')
+    expect(sent.find((entry) => entry.orderBy === 'severity_asc')!.refresh).toBe(true)
   })
 
   it('renders a coloured severity badge per level', async () => {

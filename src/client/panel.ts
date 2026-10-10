@@ -8,7 +8,7 @@
  *    four-strategy report with the next action per strategy, because "未登录"
  *    on its own is what made the old flow waste turns.
  */
-import { createElement, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { severityTone, priTone, type SeverityTone} from '../severity.js'
 
 import type { ZentaoCallResult as RpcResult } from '../protocol.js'
@@ -426,6 +426,21 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
 
+  /**
+   * The filter/sort combination the list currently holds data for, **seeded with
+   * the initial combination**. That seeding is what keeps the *first* open from
+   * firing a forced fetch: the effect below only fires when this key actually
+   * differs, i.e. when the user changed the sort/filter/scope.
+   *
+   * Deliberately a ref and not `lastUpdated`: that state means "when did we last
+   * refresh", and it changes on *every* refresh — using it as the guard made the
+   * sort effect re-fire after each manual refresh (two identical forced list
+   * fetches) and suppressed the forced re-read after a real sort change.
+   */
+  const listFilterRef = useRef([only, orderBy, scope, projectID].join('\u0000'))
+  /** One-shot guard so the cache-first list load does not repeat on every dep change. */
+  const initialListLoadRef = useRef(false)
+
   const call = useCallback(async (endpoint: string, payload?: unknown): Promise<unknown> => {
     const result = await deps.call(endpoint, payload)
     if (!result.ok) throw new Error(result.error.message)
@@ -445,10 +460,17 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     }
   }, [call])
 
-  const refreshBugs = useCallback(async (force = false) => {
+  /**
+   * `force` omitted → let the host answer from its 60s list cache when it can.
+   * That is what the first paint wants: paint instantly from cache, then let a
+   * forced refresh replace it. Each `force: true` costs a full ZenTao read —
+   * two page fetches (HTML + `&t=json`) through the single-flight relay — so the
+   * forced path is reserved for the sort/filter change and the refresh button.
+   */
+  const refreshBugs = useCallback(async (force?: boolean) => {
     setBusy('bugs')
     try {
-      const value = await call('listBugs', { limit: 30, only, orderBy, scope, ...(projectID === '' ? {} : { projectID }), refresh: force }) as BugsPayload
+      const value = await call('listBugs', { limit: 30, only, orderBy, scope, ...(projectID === '' ? {} : { projectID }), ...(force === undefined ? {} : { refresh: force }) }) as BugsPayload
       setBugs(value.bugs)
       setBugsTotal({ total: value.total, truncated: value.truncated === true, ...(value.projectName === undefined ? {} : { projectName: value.projectName }) })
       setError('')
@@ -510,7 +532,13 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     }
   }, [call])
 
-  useEffect(() => { void refreshStatus(true) }, [refreshStatus])
+  // First paint: let the host answer from its own caches (30s probe / 60s list)
+  // instead of forcing a full re-read. Forcing here meant every open of the
+  // panel paid one status probe plus two list page fetches through the
+  // single-flight browser relay — the bulk of "the panel is slow to open".
+  // A cold cache still costs one round trip, which is unavoidable; what changed
+  // is that re-opening within the TTL is now instant.
+  useEffect(() => { void refreshStatus(false) }, [refreshStatus])
 
   // Projects are only needed when the user picks that scope, so they load lazily.
   useEffect(() => {
@@ -527,24 +555,33 @@ export function ZentaoPanel(deps: PanelDeps): ReactNode {
     return () => { cancelled = true }
   }, [scope, projects.length, call])
 
-  // Changing the filter or the sort must re-read: the loading effect below only
-  // runs its initial fetch once (`lastUpdated` is already set afterwards), so
-  // without this the list kept showing the previous order — caught by the
-  // sort behaviour test.
+  // Changing the filter or the sort must re-read, and it must be a **forced**
+  // read: the host serves `listBugs` from its 60s list cache whenever `refresh`
+  // is absent, so a cache-first re-read here kept showing the previous result
+  // set after the user changed the sort. The first open must NOT fire here —
+  // the effect below already does the initial cache-first load, and forcing one
+  // on mount was the redundant round trip this panel paid on every open.
   useEffect(() => {
     if (!(open || inline) || config?.authenticated !== true) return undefined
+    const key = [only, orderBy, scope, projectID].join('\u0000')
+    if (listFilterRef.current === key) return undefined
+    listFilterRef.current = key
     void refreshBugs(true)
     return undefined
   }, [open, config?.authenticated, only, orderBy, scope, projectID, refreshBugs])
-
   useEffect(() => {
     if (!(open || inline) || config?.authenticated !== true) return undefined
-    if (lastUpdated === null) void refreshAll(false)
+    // Cache-first initial load of the list (the first-paint effect above does
+    // the same for the session status). Cheap when warm, one round trip when cold.
+    if (!initialListLoadRef.current) {
+      initialListLoadRef.current = true
+      void refreshBugs()
+    }
     if (tab === 'tasks' && tasks.length === 0 && taskNote === '') void refreshTasks()
     if (intervalMin <= 0) return undefined
     const timer = window.setInterval(() => { void refreshAll(true) }, intervalMin * 60_000)
     return () => window.clearInterval(timer)
-  }, [open, config?.authenticated, intervalMin, refreshAll, lastUpdated, tab, tasks.length, taskNote, refreshTasks])
+  }, [open, config?.authenticated, intervalMin, refreshAll, tab, tasks.length, taskNote, refreshTasks, refreshBugs])
 
   useEffect(() => {
     if (flash === '') return undefined
